@@ -33,6 +33,10 @@ SHA-256だけを保存し、共有フォルダのパスそのものは保存し�
 元へ戻すときは LM Studio を終了して `3-Restore.cmd` をダブルクリックします。パッケージ自体を
 確認したい場合は `Check-Package.cmd` を使用できます。
 
+チャット履歴、添付ファイル、LM Studioのサーバーログ、本プロジェクトの実行ログを削除する場合は、
+LM Studioを完全に終了して `4-Delete-Private-Data.cmd` をダブルクリックします。削除前に確認が表示され、
+モデル、Runtime、設定、認証情報、バックアップ、状態ファイルは保持されます。この削除は元に戻せません。
+
 これらの `.cmd` は同梱されたローカルの `.ps1` だけを起動します。PowerShellの
 `ExecutionPolicy Bypass` はその1回のプロセスだけに適用され、PC全体の実行ポリシーは変更しません。
 
@@ -142,6 +146,19 @@ Firewallも明示的に削除する完全解除だけ、PowerShellから `-Remov
 | `secure-setup\logs\` | 本プロジェクト | Setup・起動・復元のログ |
 | `secure-setup\backups\` | 本プロジェクト | JSON変更前と復元前のバックアップ |
 | Firewallグループ `LM Studio Secure Local-Only` | 本プロジェクト | `ProjectFirewall = 'ON'`の場合だけ作成し、対象実行ファイルの非ループバック通信を遮断 |
+
+## 個人データの削除
+
+`4-Delete-Private-Data.cmd` は、確認後に次の4領域の中身だけを削除します。
+
+- `%USERPROFILE%\.lmstudio\conversations`：チャット履歴
+- `%USERPROFILE%\.lmstudio\user-files`：チャット添付ファイルとメタデータ
+- `%USERPROFILE%\.lmstudio\server-logs`：LM Studioのサーバーログ
+- `%USERPROFILE%\.lmstudio\secure-setup\logs`：本プロジェクトのSetup・起動・復元ログ
+
+`3-Restore.cmd` は設定復元であり、履歴を黙って削除しません。個人データ削除は必ず専用ファイルから
+明示的に実行します。削除対象は固定パスとして検証され、シンボリックリンクやジャンクションを含む場合は
+安全のため停止します。これは通常のファイル削除であり、SSD等からの暗号学的な完全消去を保証するものではありません。
 
 `setup-state.json` は手作業で編集しないでください。削除・破損・内容不一致がある場合、安全起動は
 LM Studioを起動せず停止します。復旧方法は Setup の再実行です。バックアップやログには、以前の

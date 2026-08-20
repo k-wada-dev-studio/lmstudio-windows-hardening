@@ -557,6 +557,28 @@ try {
     }
     $runtimeProcesses = @(Get-RunningLMStudioProcesses -HomePath $runtimeHome)
     Assert-True ($runtimeProcesses.Count -eq 1 -and $runtimeProcesses[0].Id -eq 4242) 'Restore detects a runtime by path even when its process name is unknown'
+
+    foreach ($definition in @(Get-ScriptFunctionDefinitions -Path (Join-Path $repo 'src\Remove-LMStudio-PrivateData.ps1'))) {
+        . $definition
+    }
+    $privacyHome = Join-Path $tempRoot 'privacy-profile'
+    $privacyTargets = @(Get-PrivateDataDeletionTargets -HomePath $privacyHome)
+    Assert-True ($privacyTargets.Count -eq 4) 'Private-data deletion exposes exactly four fixed data categories'
+    foreach ($target in $privacyTargets) {
+        New-Item -ItemType Directory -Path $target.Path -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $target.Path 'fixture.dat'), $target.Key)
+    }
+    [IO.File]::WriteAllText((Join-Path $privacyHome 'settings.json'), 'preserve-settings')
+    New-Item -ItemType Directory -Path (Join-Path $privacyHome 'models') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $privacyHome 'models\preserve.gguf'), 'preserve-model')
+    $privacyResult = Remove-LMStudioPrivateData -HomePath $privacyHome
+    Assert-True ($privacyResult.FileCount -eq 4) 'Private-data deletion reports the deleted files'
+    Assert-True (@($privacyTargets | Where-Object {
+        -not (Test-Path -LiteralPath $_.Path -PathType Container) -or
+        @(Get-ChildItem -LiteralPath $_.Path -Force).Count -ne 0
+    }).Count -eq 0) 'Private-data deletion leaves the four fixed directories empty'
+    Assert-True ((Test-Path -LiteralPath (Join-Path $privacyHome 'settings.json') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $privacyHome 'models\preserve.gguf') -PathType Leaf)) 'Private-data deletion preserves settings and models'
 }
 finally {
     $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

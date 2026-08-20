@@ -35,7 +35,7 @@ function Get-TextFiles {
 
 $repo = [IO.Path]::GetFullPath($RepoRoot)
 $scripts = @(Get-ChildItem -LiteralPath (Join-Path $repo 'src') -Filter '*.ps1' -File)
-Assert-True ($scripts.Count -eq 3) 'Exactly three product scripts are present'
+Assert-True ($scripts.Count -eq 4) 'Exactly four product scripts are present'
 
 foreach ($scriptFile in $scripts) {
     $tokens = $null
@@ -87,6 +87,7 @@ $scanFiles = Get-TextFiles -Roots @(
     (Join-Path $repo '1-Setup.cmd'),
     (Join-Path $repo '2-Start-Secure.cmd'),
     (Join-Path $repo '3-Restore.cmd'),
+    (Join-Path $repo '4-Delete-Private-Data.cmd'),
     (Join-Path $repo 'Check-Package.cmd')
 )
 foreach ($file in $scanFiles) {
@@ -134,6 +135,7 @@ foreach ($name in @('Setup-LMStudio.ps1', 'Start-LMStudio-Secure.ps1')) {
 $setupText = [IO.File]::ReadAllText((Join-Path $repo 'src\Setup-LMStudio.ps1'))
 $startText = [IO.File]::ReadAllText((Join-Path $repo 'src\Start-LMStudio-Secure.ps1'))
 $restoreText = [IO.File]::ReadAllText((Join-Path $repo 'src\Restore-LMStudio.ps1'))
+$privateDataRemovalText = [IO.File]::ReadAllText((Join-Path $repo 'src\Remove-LMStudio-PrivateData.ps1'))
 foreach ($textAndName in @(
     [pscustomobject]@{ Name = 'Setup-LMStudio.ps1'; Text = $setupText },
     [pscustomobject]@{ Name = 'Start-LMStudio-Secure.ps1'; Text = $startText }
@@ -186,9 +188,16 @@ Assert-True ($restoreText.Contains('Managed Firewall rules were removed, but the
 $restoreEntryText = [IO.File]::ReadAllText((Join-Path $repo '3-Restore.cmd'))
 Assert-True (-not $restoreEntryText.Contains('-RemoveFirewall')) 'Non-technical Restore entry point never removes Firewall rules by default'
 Assert-True ($restoreEntryText.Contains('Run 1-Setup.cmd next')) 'Non-technical Restore entry point gives the safe next action'
+Assert-True ($privateDataRemovalText.Contains("Join-Path `$resolvedHome 'conversations'")) 'Private-data deletion targets LM Studio chat history'
+Assert-True ($privateDataRemovalText.Contains("Join-Path `$resolvedHome 'user-files'")) 'Private-data deletion targets chat attachments'
+Assert-True ($privateDataRemovalText.Contains("Join-Path `$resolvedHome 'server-logs'")) 'Private-data deletion targets LM Studio server logs'
+Assert-True ($privateDataRemovalText.Contains("Join-Path `$resolvedHome 'secure-setup\logs'")) 'Private-data deletion targets project logs'
+Assert-True ($privateDataRemovalText.Contains('[switch]$ConfirmDeletion')) 'Private-data deletion requires an explicit destructive switch'
+Assert-True ($privateDataRemovalText.Contains('ReparsePoint')) 'Private-data deletion refuses symbolic links and junctions'
+Assert-True (-not $privateDataRemovalText.Contains("Join-Path `$resolvedHome 'models'")) 'Private-data deletion does not target models'
 
 $entryPoints = @(Get-ChildItem -LiteralPath $repo -Filter '*.cmd' -File)
-Assert-True ($entryPoints.Count -eq 4) 'Four non-technical command entry points are present'
+Assert-True ($entryPoints.Count -eq 5) 'Five non-technical command entry points are present'
 foreach ($entryPoint in $entryPoints) {
     $entryText = [IO.File]::ReadAllText($entryPoint.FullName)
     $entryBytes = [IO.File]::ReadAllBytes($entryPoint.FullName)

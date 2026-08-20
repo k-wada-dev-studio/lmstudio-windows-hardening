@@ -139,7 +139,24 @@ If explicitly requested Firewall removal or UAC approval fails, the JSON restore
 complete, but blocking rules remain. This is the safer failure state. Review the
 log and re-run restore; do not manually delete unrelated Firewall rules.
 
-## 7. Manual release checklist
+## 7. Delete private chat data and logs
+
+Close LM Studio and all runtimes, then use `4-Delete-Private-Data.cmd`. The
+entry point requires an explicit confirmation and removes only chat history,
+chat attachments, LM Studio server logs, and this project's logs. It does not
+remove models, runtimes, settings, credentials, backups, or setup state.
+
+For a read-only inventory, run:
+
+```powershell
+.\src\Remove-LMStudio-PrivateData.ps1 -PreviewOnly
+```
+
+Deletion refuses reparse points, stages the fixed directories in a same-volume
+quarantine, and rolls back if staging fails. Normal filesystem deletion is not
+cryptographic secure erasure.
+
+## 8. Manual release checklist
 
 Before tagging a stable release, test on a disposable Windows machine:
 
