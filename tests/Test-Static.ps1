@@ -73,8 +73,8 @@ $deploymentExampleHasBom = $deploymentExampleBytes.Length -ge 3 -and
     $deploymentExampleBytes[2] -eq 0xBF
 Assert-True $deploymentExampleHasBom 'Deployment configuration example has a UTF-8 BOM for Windows PowerShell 5.1'
 $deploymentExampleText = [IO.File]::ReadAllText($deploymentExample)
-Assert-True ($deploymentExampleText.Contains("ProjectFirewall = 'ON'")) 'Deployment example defaults ProjectFirewall to ON'
-Assert-True ($deploymentExampleText.Contains('OFF')) 'Deployment example documents the ProjectFirewall OFF choice'
+Assert-True ($deploymentExampleText.Contains("ProjectFirewall = 'OFF'")) 'Deployment example defaults ProjectFirewall to OFF'
+Assert-True ($deploymentExampleText.Contains('ON')) 'Deployment example documents the ProjectFirewall ON choice'
 
 $scanFiles = Get-TextFiles -Roots @(
     (Join-Path $repo 'src'),
@@ -153,7 +153,14 @@ Assert-True ($setupText.Contains('if (Test-IsAdministrator)')) 'Setup refuses el
 Assert-True (-not [regex]::IsMatch($setupText, '(?m)^\s*ResolvedModelPath\s*=')) 'Setup never persists the plaintext model path'
 Assert-True (-not [regex]::IsMatch($startText, '(?m)^\s*ModelPath\s*=')) 'Launcher never persists the plaintext model path'
 Assert-True ($setupText.Contains('ResolvedModelPathSha256')) 'Setup persists only a model path identity hash'
-Assert-True ($startText.Contains("SchemaVersion') -ne 4")) 'Launcher rejects legacy or unmanaged setup state'
+Assert-True ($startText.Contains("SchemaVersion') -ne 5")) 'Launcher rejects legacy or unmanaged setup state'
+Assert-True ($setupText.Contains('VisionProjectorPath')) 'Setup supports an optional separate VLM image projector'
+Assert-True ($setupText.Contains('mmproj(?:[-_.].*)?\.gguf')) 'Setup identifies projector GGUFs separately from the one approved LLM'
+Assert-True ($setupText.Contains('${modelPackageDescription}を確認しました')) 'Setup delimits the Japanese model-package log variable correctly'
+Assert-True ($setupText.Contains('${registrationDescription}をLM Studio')) 'Setup delimits the Japanese registration log variable correctly'
+Assert-True ($startText.Contains('Get-ModelVisionEnabled')) 'Launcher verifies LM Studio vision capability before completing launch'
+Assert-True ($startText.Contains('LISTENING\s+(\d+)')) 'Launcher listener parser requires the TCP LISTENING state'
+Assert-True ($restoreText.Contains('ManagedVisionProjectorLinkPath')) 'Restore removes the recorded projector link as part of the managed model package'
 Assert-True ($startText.Contains("ProvisioningMode') -ne 'ManagedSymbolicLink'")) 'Launcher requires setup-managed model registration'
 Assert-True ($startText.Contains('Assert-ManagedModelLink')) 'Launcher verifies the setup-managed model remains a symbolic link'
 Assert-True ($setupText.Contains("'ProjectManaged'") -and $setupText.Contains("'ExternallyManaged'")) 'Setup implements both Firewall management modes'

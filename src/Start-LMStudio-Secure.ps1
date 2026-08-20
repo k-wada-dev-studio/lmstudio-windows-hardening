@@ -197,10 +197,21 @@ function Get-ModelPathIdentitySha256 {
     return Get-StringSha256 -Value $normalized
 }
 
+function Get-AbsolutePathIdentitySha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw '絶対パス識別子が空です。'
+    }
+    $normalized = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/').ToUpperInvariant()
+    return Get-StringSha256 -Value $normalized
+}
+
 function Assert-ManagedModelLink {
     param(
         [Parameter(Mandatory = $true)][string]$LinkPath,
-        [Parameter(Mandatory = $true)][string]$LmStudioHomePath
+        [Parameter(Mandatory = $true)][string]$LmStudioHomePath,
+        [Parameter(Mandatory = $true)][string]$ExpectedTargetPathSha256
     )
 
     $managedRoot = [IO.Path]::GetFullPath(
@@ -218,6 +229,25 @@ function Assert-ManagedModelLink {
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -or
         [string]$item.LinkType -ne 'SymbolicLink') {
         throw '管理対象モデルの配置先がシンボリックリンクではありません。'
+    }
+    if ($ExpectedTargetPathSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+        throw '管理対象モデルリンクの参照先ハッシュが状態ファイルにありません。'
+    }
+    $targets = @($item.Target)
+    if ($targets.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$targets[0])) {
+        throw '管理対象モデルリンクの参照先を一意に確認できません。'
+    }
+    $targetPath = [string]$targets[0]
+    if (-not [IO.Path]::IsPathRooted($targetPath)) {
+        $targetPath = Join-Path (Split-Path -Parent $resolvedLinkPath) $targetPath
+    }
+    $actualTargetPathSha256 = Get-AbsolutePathIdentitySha256 -Path $targetPath
+    if (-not [string]::Equals(
+        $actualTargetPathSha256,
+        $ExpectedTargetPathSha256,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw '管理対象モデルリンクの参照先がセットアップ時から変化しています。'
     }
 }
 
@@ -447,6 +477,19 @@ function Get-RunningLMStudioProcesses {
     return $results.ToArray()
 }
 
+function Get-ModelVisionEnabled {
+    param(
+        [Parameter(Mandatory = $true)][object]$Model,
+        [Parameter(Mandatory = $true)][string]$SourceDescription
+    )
+
+    $vision = Get-PropertyValue -InputObject $Model -Name 'vision'
+    if ($vision -isnot [bool]) {
+        throw "$SourceDescription から画像入力対応（vision）の真偽を確認できません。LM Studioの更新後はSetupを再実行してください。"
+    }
+    return [bool]$vision
+}
+
 function Invoke-NativeCapture {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -477,7 +520,11 @@ function ConvertFrom-NetstatListeningEndpoints {
 
     $results = New-Object Collections.Generic.List[object]
     foreach ($line in @($Text -split "`r?`n")) {
-        $match = [regex]::Match($line, '^\s*TCP\s+(\S+)\s+\S+\s+\S+\s+(\d+)\s*$', 'IgnoreCase')
+        $match = [regex]::Match(
+            $line,
+            '^\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+(\d+)\s*$',
+            'IgnoreCase'
+        )
         if (-not $match.Success) { continue }
 
         $processId = [int]$match.Groups[2].Value
@@ -1261,7 +1308,7 @@ function Invoke-MainLaunch {
         Join-Path $script:SetupRoot 'setup-state.json'
     } else { [IO.Path]::GetFullPath($SetupStatePath) }
     $state = Read-JsonFile -Path $statePath
-    if ((Get-PropertyValue -InputObject $state -Name 'SchemaVersion') -ne 4 -or
+    if ((Get-PropertyValue -InputObject $state -Name 'SchemaVersion') -ne 5 -or
         (Get-PropertyValue -InputObject $state -Name 'Complete') -ne $true -or
         (Get-PropertyValue -InputObject $state -Name 'ProvisioningMode') -ne 'ManagedSymbolicLink') {
         throw '完全なセットアップ状態がありません。Setup-LMStudio.ps1 を再実行してください。'
@@ -1272,6 +1319,9 @@ function Invoke-MainLaunch {
     $expectedModelPathHash = [string](Get-PropertyValue -InputObject $state -Name 'ResolvedModelPathSha256')
     $expectedModelRepository = [string](Get-PropertyValue -InputObject $state -Name 'ExpectedModelRepository')
     $managedModelLinkPath = [string](Get-PropertyValue -InputObject $state -Name 'ManagedModelLinkPath')
+    $managedModelSourcePathSha256 = [string](Get-PropertyValue -InputObject $state -Name 'ManagedModelSourcePathSha256')
+    $visionProjectorConfigured = (Get-PropertyValue -InputObject $state -Name 'VisionProjectorConfigured') -eq $true
+    $managedVisionProjectorLinkPath = [string](Get-PropertyValue -InputObject $state -Name 'ManagedVisionProjectorLinkPath')
     if ([string]::IsNullOrWhiteSpace($managedModelLinkPath) -or
         ($modelValidationPending -and
             $expectedModelRepository -notmatch '^secure-deployment/[A-Za-z0-9._-]+$') -or
@@ -1281,7 +1331,35 @@ function Invoke-MainLaunch {
         ))) {
         throw 'setup-state.json に承認モデルが記録されていません。'
     }
-    Assert-ManagedModelLink -LinkPath $managedModelLinkPath -LmStudioHomePath $homePath
+    Assert-ManagedModelLink `
+        -LinkPath $managedModelLinkPath `
+        -LmStudioHomePath $homePath `
+        -ExpectedTargetPathSha256 $managedModelSourcePathSha256
+    if ($visionProjectorConfigured) {
+        $managedVisionProjectorSourcePathSha256 = [string](Get-PropertyValue `
+            -InputObject $state `
+            -Name 'ManagedVisionProjectorSourcePathSha256')
+        if ([string]::IsNullOrWhiteSpace($managedVisionProjectorLinkPath) -or
+            [IO.Path]::GetFileName($managedVisionProjectorLinkPath) -notmatch '^(?i:mmproj(?:[-_.].*)?\.gguf)$') {
+            throw 'setup-state.json に画像プロジェクターの管理情報が正しく記録されていません。'
+        }
+        Assert-ManagedModelLink `
+            -LinkPath $managedVisionProjectorLinkPath `
+            -LmStudioHomePath $homePath `
+            -ExpectedTargetPathSha256 $managedVisionProjectorSourcePathSha256
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($managedVisionProjectorLinkPath)) {
+        throw '画像プロジェクターの設定状態と管理リンク情報が矛盾しています。Setup-LMStudio.ps1を再実行してください。'
+    }
+
+    $visionEnabled = $false
+    if (-not $modelValidationPending) {
+        $savedVisionEnabled = Get-PropertyValue -InputObject $state -Name 'VisionEnabled'
+        if ($savedVisionEnabled -isnot [bool]) {
+            throw 'setup-state.json に検証済みの画像入力対応状態がありません。Setup-LMStudio.ps1を再実行してください。'
+        }
+        $visionEnabled = [bool]$savedVisionEnabled
+    }
 
     $exePath = Get-LMStudioExecutablePath -RequestedPath $LmStudioExePath -SetupState $state
     $lmsPath = Join-Path $homePath 'bin\lms.exe'
@@ -1415,8 +1493,22 @@ function Invoke-MainLaunch {
             -AllowedModelKey $allowedModelKey `
             -ExpectedModelPathSha256 $expectedModelPathHash
     }
+    $inventoryVisionEnabled = Get-ModelVisionEnabled `
+        -Model $approvedModel `
+        -SourceDescription 'LM Studioのモデル一覧'
+    if ($visionProjectorConfigured -and -not $inventoryVisionEnabled) {
+        throw ('画像プロジェクターは登録されていますが、LM Studioは承認モデルを vision:false と判定しました。' +
+            'モデル本体・mmproj・Runtime・LM Studioの組み合わせを確認してください。')
+    }
+    if ($modelValidationPending) {
+        $visionEnabled = $inventoryVisionEnabled
+    }
+    elseif ($inventoryVisionEnabled -ne $visionEnabled) {
+        throw '承認モデルの画像入力対応状態が初回安全起動時から変化しています。Setup-LMStudio.ps1を再実行してください。'
+    }
     Assert-NoAdditionalLlms -Models $models -AllowedModelKey $allowedModelKey
-    Write-LaunchLog -Level OK -Message "承認モデルだけが存在することを確認しました: $allowedModelKey"
+    Write-LaunchLog -Level OK -Message ("承認モデルだけが存在することを確認しました: {0} / Vision: {1}" -f
+        $allowedModelKey, $(if ($visionEnabled) { 'ENABLED' } else { 'DISABLED' }))
 
     $runtimeResult = Invoke-NativeCapture -FilePath $lmsPath -ArgumentList @('runtime', 'ls')
     if ($runtimeResult.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($runtimeResult.Text)) {
@@ -1509,6 +1601,12 @@ function Invoke-MainLaunch {
         -ExpectedIdentifier $Identifier)) {
         throw 'ロードされたモデルが承認モデルと一致しません。'
     }
+    $loadedVisionEnabled = Get-ModelVisionEnabled `
+        -Model $loadedModels[0] `
+        -SourceDescription 'LM Studioのロード済みモデル一覧'
+    if ($loadedVisionEnabled -ne $visionEnabled) {
+        throw 'ロードされたモデルの画像入力対応状態が、検証した承認モデルと一致しません。'
+    }
     Assert-LMStudioListensOnlyOnLoopback -ExePath $exePath -HomePath $homePath
 
     if ($modelValidationPending) {
@@ -1517,6 +1615,7 @@ function Invoke-MainLaunch {
         $state | Add-Member -NotePropertyName ModelFormat -NotePropertyValue ([string](Get-PropertyValue -InputObject $approvedModel -Name 'format')) -Force
         $state | Add-Member -NotePropertyName RuntimeInventorySha256 -NotePropertyValue $actualRuntimeHash -Force
         $state | Add-Member -NotePropertyName ModelValidationPending -NotePropertyValue $false -Force
+        $state | Add-Member -NotePropertyName VisionEnabled -NotePropertyValue $visionEnabled -Force
         $state | Add-Member -NotePropertyName LoadEstimateChecked -NotePropertyValue (-not $skipLoadEstimate) -Force
         $state | Add-Member -NotePropertyName ValidatedAtUtc -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
         $stateTemp = Write-ValidatedJsonTempFile -DestinationPath $statePath -InputObject $state
@@ -1525,13 +1624,14 @@ function Invoke-MainLaunch {
     }
 
     $lastLaunch = [ordered]@{
-        SchemaVersion     = 4
+        SchemaVersion     = 5
         SucceededAtUtc    = [DateTime]::UtcNow.ToString('o')
         ModelKey          = $allowedModelKey
         ModelPathSha256   = $expectedModelPathHash
         Identifier        = $Identifier
         ContextLength     = $ContextLength
         Gpu               = $Gpu
+        VisionEnabled     = $visionEnabled
         GuiProcessId      = $script:StartedGuiProcess.Id
         FirewallMode      = $firewallMode
         FirewallRuleCount = $firewallRuleCount
@@ -1551,6 +1651,7 @@ function Invoke-MainLaunch {
     Write-Host (' Model    : {0}' -f $allowedModelKey)
     Write-Host (' Identifier: {0}' -f $Identifier)
     Write-Host (' Context  : {0}' -f $ContextLength)
+    Write-Host (' Vision   : {0}' -f $(if ($visionEnabled) { 'ENABLED' } else { 'DISABLED' }))
     $networkSummary = if ($firewallManagement.ProjectManaged) {
         'LOCALHOST ONLY (PROJECT VERIFIED)'
     }

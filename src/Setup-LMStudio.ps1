@@ -113,7 +113,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $script:SetupRoot = $null
 $script:LogPath = $null
-$script:CreatedManagedModelLink = $null
+$script:CreatedManagedModelLinks = @()
 $script:SetupMutex = $null
 $script:SetupMutexOwned = $false
 $script:FirewallGroup = 'LM Studio Secure Local-Only'
@@ -258,7 +258,7 @@ function Read-DeploymentModelConfig {
     }
 
     foreach ($key in @($config.Keys)) {
-        if ([string]$key -notin @('ModelSourcePath', 'ModelUserRepo', 'ProjectFirewall', 'FirewallMode')) {
+        if ([string]$key -notin @('ModelSourcePath', 'VisionProjectorPath', 'ModelUserRepo', 'ProjectFirewall', 'FirewallMode')) {
             throw "配布設定に未対応の項目があります: $key"
         }
     }
@@ -271,26 +271,71 @@ function Read-DeploymentModelConfig {
         throw '配布設定の ModelSourcePath が空です。'
     }
 
+    $visionProjectorPath = ''
+    $explicitVisionProjector = if ($config.Contains('VisionProjectorPath')) {
+        [string]$config['VisionProjectorPath']
+    }
+    else { '' }
+
     try {
         $sourcePath = [IO.Path]::GetFullPath($sourceSetting)
         if (Test-Path -LiteralPath $sourcePath -PathType Container) {
-            $candidates = @(Get-ChildItem -LiteralPath $sourcePath -Filter '*.gguf' -File -ErrorAction Stop)
-            if ($candidates.Count -ne 1) {
-                throw "共有フォルダ直下の GGUF は1つだけ必要です。検出数: $($candidates.Count)"
+            if (-not [string]::IsNullOrWhiteSpace($explicitVisionProjector)) {
+                throw 'ModelSourcePath がフォルダの場合、VisionProjectorPath は指定せず同じフォルダへ配置してください。'
             }
-            $sourcePath = $candidates[0].FullName
+            $candidates = @(Get-ChildItem -LiteralPath $sourcePath -Filter '*.gguf' -File -ErrorAction Stop)
+            $projectorCandidates = @($candidates | Where-Object {
+                $_.Name -match '^(?i:mmproj(?:[-_.].*)?\.gguf)$'
+            })
+            $modelCandidates = @($candidates | Where-Object {
+                $_.Name -notmatch '^(?i:mmproj(?:[-_.].*)?\.gguf)$'
+            })
+            if ($modelCandidates.Count -ne 1) {
+                throw "共有フォルダ直下のモデル本体GGUFは1つだけ必要です。検出数: $($modelCandidates.Count)"
+            }
+            if ($projectorCandidates.Count -gt 1) {
+                throw "共有フォルダ直下の画像プロジェクターGGUFは最大1つです。検出数: $($projectorCandidates.Count)"
+            }
+            $sourcePath = $modelCandidates[0].FullName
+            if ($projectorCandidates.Count -eq 1) {
+                $visionProjectorPath = $projectorCandidates[0].FullName
+            }
         }
         elseif (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
             throw '共有モデルファイルを参照できません。'
         }
+        elseif (-not [string]::IsNullOrWhiteSpace($explicitVisionProjector)) {
+            $visionProjectorPath = [IO.Path]::GetFullPath($explicitVisionProjector)
+            if (-not (Test-Path -LiteralPath $visionProjectorPath -PathType Leaf)) {
+                throw '画像プロジェクターファイルを参照できません。'
+            }
+        }
     }
     catch {
-        if ($_.Exception.Message -like '共有フォルダ直下*') { throw }
+        if ($_.Exception.Message -like '共有フォルダ直下*' -or
+            $_.Exception.Message -like 'ModelSourcePath がフォルダ*' -or
+            $_.Exception.Message -like '画像プロジェクター*') { throw }
         throw '共有モデルを参照できません。共有先、資格情報、アクセス権を配布管理者が確認してください。'
     }
 
     if (-not [string]::Equals([IO.Path]::GetExtension($sourcePath), '.gguf', [StringComparison]::OrdinalIgnoreCase)) {
         throw '現在の自動登録で扱える共有モデルは GGUF ファイルだけです。'
+    }
+    if ([IO.Path]::GetFileName($sourcePath) -match '^(?i:mmproj(?:[-_.].*)?\.gguf)$') {
+        throw 'ModelSourcePath には画像プロジェクターではなく、モデル本体のGGUFを指定してください。'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($visionProjectorPath)) {
+        if (-not [string]::Equals([IO.Path]::GetExtension($visionProjectorPath), '.gguf', [StringComparison]::OrdinalIgnoreCase) -or
+            [IO.Path]::GetFileName($visionProjectorPath) -notmatch '^(?i:mmproj(?:[-_.].*)?\.gguf)$') {
+            throw 'VisionProjectorPath は mmproj-*.gguf 形式の画像プロジェクターを指定してください。'
+        }
+        if ([string]::Equals(
+            (Get-AbsolutePathIdentitySha256 -Path $sourcePath),
+            (Get-AbsolutePathIdentitySha256 -Path $visionProjectorPath),
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw 'モデル本体と画像プロジェクターに同じファイルは指定できません。'
+        }
     }
 
     $userRepo = if ($config.Contains('ModelUserRepo')) {
@@ -317,7 +362,7 @@ function Read-DeploymentModelConfig {
         elseif ([string]::Equals($legacyMode, 'ExternallyManaged', [StringComparison]::OrdinalIgnoreCase)) { 'OFF' }
         else { throw '旧形式の FirewallMode は ProjectManaged または ExternallyManaged を指定してください。' }
     }
-    else { 'ON' }
+    else { 'OFF' }
 
     if ([string]::Equals($projectFirewall, 'ON', [StringComparison]::OrdinalIgnoreCase)) {
         $projectFirewall = 'ON'
@@ -333,6 +378,8 @@ function Read-DeploymentModelConfig {
 
     return [pscustomobject]@{
         SourcePath = $sourcePath
+        VisionProjectorPath = $visionProjectorPath
+        VisionProjectorConfigured = (-not [string]::IsNullOrWhiteSpace($visionProjectorPath))
         UserRepo = $userRepo
         ProjectFirewall = $projectFirewall
         FirewallMode = $firewallMode
@@ -365,13 +412,71 @@ function Get-DeploymentModelLinkInfo {
     )
 
     $sourcePath = [string]$DeploymentConfig.SourcePath
+    $visionProjectorPath = [string]$DeploymentConfig.VisionProjectorPath
     $userRepo = [string]$DeploymentConfig.UserRepo
     $repoParts = $userRepo.Split('/')
     $repositoryRoot = Join-Path (Join-Path (Join-Path $LmStudioHomePath 'models') $repoParts[0]) $repoParts[1]
     return [pscustomobject]@{
         LinkPath = (Join-Path $repositoryRoot ([IO.Path]::GetFileName($sourcePath)))
         IndexedPath = ($userRepo + '/' + [IO.Path]::GetFileName($sourcePath))
+        VisionProjectorLinkPath = if ([string]::IsNullOrWhiteSpace($visionProjectorPath)) {
+            ''
+        } else {
+            Join-Path $repositoryRoot ([IO.Path]::GetFileName($visionProjectorPath))
+        }
     }
+}
+
+function Add-CreatedManagedModelLink {
+    param([Parameter(Mandatory = $true)][string]$LinkPath)
+
+    if (@($script:CreatedManagedModelLinks | Where-Object {
+        [string]::Equals([string]$_, $LinkPath, [StringComparison]::OrdinalIgnoreCase)
+    }).Count -eq 0) {
+        $script:CreatedManagedModelLinks += $LinkPath
+    }
+}
+
+function Register-VisionProjectorLink {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$LinkPath
+    )
+
+    $sourceHash = Get-AbsolutePathIdentitySha256 -Path $SourcePath
+    if (Test-Path -LiteralPath $LinkPath) {
+        $existingTarget = Get-SymbolicLinkTargetPath -LinkPath $LinkPath
+        if (-not [string]::Equals(
+            (Get-AbsolutePathIdentitySha256 -Path $existingTarget),
+            $sourceHash,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw '画像プロジェクターの既存リンクが、配布設定とは異なるファイルを指しています。'
+        }
+        return $false
+    }
+
+    $parent = Split-Path -Parent $LinkPath
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        throw '画像プロジェクターの登録先フォルダがありません。モデル本体の登録を確認してください。'
+    }
+    try {
+        $null = New-Item -ItemType SymbolicLink -Path $LinkPath -Target $SourcePath -ErrorAction Stop
+        Add-CreatedManagedModelLink -LinkPath $LinkPath
+    }
+    catch {
+        throw '画像プロジェクターのシンボリックリンク登録に失敗しました。作成権限と共有ファイルへのアクセスを確認してください。'
+    }
+
+    $actualTarget = Get-SymbolicLinkTargetPath -LinkPath $LinkPath
+    if (-not [string]::Equals(
+        (Get-AbsolutePathIdentitySha256 -Path $actualTarget),
+        $sourceHash,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw '作成された画像プロジェクターリンクの参照先が配布設定と一致しません。'
+    }
+    return $true
 }
 
 function Register-DeploymentModel {
@@ -382,6 +487,7 @@ function Register-DeploymentModel {
     )
 
     $sourcePath = [string]$DeploymentConfig.SourcePath
+    $visionProjectorPath = [string]$DeploymentConfig.VisionProjectorPath
     $userRepo = [string]$DeploymentConfig.UserRepo
     $linkInfo = Get-DeploymentModelLinkInfo `
         -LmStudioHomePath $LmStudioHomePath `
@@ -389,6 +495,7 @@ function Register-DeploymentModel {
     $linkPath = [string]$linkInfo.LinkPath
     $sourceHash = Get-AbsolutePathIdentitySha256 -Path $sourcePath
 
+    $mainCreated = $false
     if (Test-Path -LiteralPath $linkPath) {
         $existingTarget = Get-SymbolicLinkTargetPath -LinkPath $linkPath
         if (-not [string]::Equals(
@@ -398,70 +505,79 @@ function Register-DeploymentModel {
         )) {
             throw '管理対象モデルの既存リンクが、配布設定とは異なる共有モデルを指しています。'
         }
-        return [pscustomobject]@{
-            LinkPath = $linkPath
-            IndexedPath = [string]$linkInfo.IndexedPath
-            Created = $false
+    }
+    else {
+        $dryRun = Invoke-NativeCapture -FilePath $LmsPath -ArgumentList @(
+            'import', $sourcePath, '--symbolic-link', '--user-repo', $userRepo, '-y', '--dry-run'
+        )
+        if ($dryRun.ExitCode -ne 0) {
+            throw '共有モデルの自動登録を事前検査できませんでした。元ファイルは変更していません。'
         }
+
+        $importResult = Invoke-NativeCapture -FilePath $LmsPath -ArgumentList @(
+            'import', $sourcePath, '--symbolic-link', '--user-repo', $userRepo, '-y'
+        )
+        if (Test-Path -LiteralPath $linkPath) {
+            Add-CreatedManagedModelLink -LinkPath $linkPath
+        }
+        if ($importResult.ExitCode -ne 0) {
+            throw ('共有モデルのシンボリックリンク登録に失敗しました。元ファイルは移動・コピーしていません。' +
+                '配布管理者はWindowsのシンボリックリンク作成権限を確認してください。')
+        }
+        if (-not (Test-Path -LiteralPath $linkPath)) {
+            throw '共有モデルの登録先を検証できませんでした。'
+        }
+
+        $actualTarget = Get-SymbolicLinkTargetPath -LinkPath $linkPath
+        if (-not [string]::Equals(
+            (Get-AbsolutePathIdentitySha256 -Path $actualTarget),
+            $sourceHash,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw '作成されたモデルリンクの参照先が配布設定と一致しません。'
+        }
+        $mainCreated = $true
     }
 
-    $dryRun = Invoke-NativeCapture -FilePath $LmsPath -ArgumentList @(
-        'import', $sourcePath, '--symbolic-link', '--user-repo', $userRepo, '-y', '--dry-run'
-    )
-    if ($dryRun.ExitCode -ne 0) {
-        throw '共有モデルの自動登録を事前検査できませんでした。元ファイルは変更していません。'
-    }
-
-    $importResult = Invoke-NativeCapture -FilePath $LmsPath -ArgumentList @(
-        'import', $sourcePath, '--symbolic-link', '--user-repo', $userRepo, '-y'
-    )
-    if (Test-Path -LiteralPath $linkPath) {
-        $script:CreatedManagedModelLink = $linkPath
-    }
-    if ($importResult.ExitCode -ne 0) {
-        throw ('共有モデルのシンボリックリンク登録に失敗しました。元ファイルは移動・コピーしていません。' +
-            '配布管理者はWindowsのシンボリックリンク作成権限を確認してください。')
-    }
-    if (-not (Test-Path -LiteralPath $linkPath)) {
-        throw '共有モデルの登録先を検証できませんでした。'
-    }
-
-    $actualTarget = Get-SymbolicLinkTargetPath -LinkPath $linkPath
-    if (-not [string]::Equals(
-        (Get-AbsolutePathIdentitySha256 -Path $actualTarget),
-        $sourceHash,
-        [StringComparison]::OrdinalIgnoreCase
-    )) {
-        throw '作成されたモデルリンクの参照先が配布設定と一致しません。'
+    $projectorCreated = $false
+    if (-not [string]::IsNullOrWhiteSpace($visionProjectorPath)) {
+        $projectorCreated = Register-VisionProjectorLink `
+            -SourcePath $visionProjectorPath `
+            -LinkPath ([string]$linkInfo.VisionProjectorLinkPath)
     }
 
     return [pscustomobject]@{
         LinkPath = $linkPath
         IndexedPath = [string]$linkInfo.IndexedPath
-        Created = $true
+        Created = $mainCreated
+        VisionProjectorLinkPath = [string]$linkInfo.VisionProjectorLinkPath
+        VisionProjectorCreated = $projectorCreated
     }
 }
 
 function Remove-CreatedManagedModelLink {
-    if ([string]::IsNullOrWhiteSpace($script:CreatedManagedModelLink)) {
+    if (@($script:CreatedManagedModelLinks).Count -eq 0) {
         return
     }
-    try {
-        if (Test-Path -LiteralPath $script:CreatedManagedModelLink) {
-            $item = Get-Item -LiteralPath $script:CreatedManagedModelLink -Force -ErrorAction Stop
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
-                throw '失敗時に削除予定の対象がリンクではないため、削除しません。'
+    $rollbackLinks = @($script:CreatedManagedModelLinks)
+    [array]::Reverse($rollbackLinks)
+    foreach ($createdLink in $rollbackLinks) {
+        try {
+            if (Test-Path -LiteralPath $createdLink) {
+                $item = Get-Item -LiteralPath $createdLink -Force -ErrorAction Stop
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -or
+                    [string]$item.LinkType -ne 'SymbolicLink') {
+                    throw '失敗時に削除予定の対象がシンボリックリンクではないため、削除しません。'
+                }
+                [IO.File]::Delete($createdLink)
+                Write-SetupLog -Level WARN -Message '今回作成した共有モデル関連リンクを巻き戻しました。'
             }
-            [IO.File]::Delete($script:CreatedManagedModelLink)
-            Write-SetupLog -Level WARN -Message '今回作成した共有モデルリンクを巻き戻しました。'
+        }
+        catch {
+            Write-SetupLog -Level ERROR -Message "共有モデル関連リンクの巻き戻しに失敗しました: $($_.Exception.Message)"
         }
     }
-    catch {
-        Write-SetupLog -Level ERROR -Message "共有モデルリンクの巻き戻しに失敗しました: $($_.Exception.Message)"
-    }
-    finally {
-        $script:CreatedManagedModelLink = $null
-    }
+    $script:CreatedManagedModelLinks = @()
 }
 
 function Get-PropertyValue {
@@ -998,12 +1114,13 @@ function Invoke-ElevatedFirewallSetup {
 
     $requestPath = Join-Path $SetupRoot ('firewall-request-{0}.json' -f ([guid]::NewGuid().ToString('N')))
     $request = [ordered]@{
-        SchemaVersion   = 4
+        SchemaVersion   = 5
         CreatedAtUtc    = [DateTime]::UtcNow.ToString('o')
         ProgramPaths    = @($ProgramPaths)
         LmsPath         = $LmsPath
         LmStudioHomePath = $LmStudioHomePath
         ModelSourcePath = [string]$DeploymentConfig.SourcePath
+        VisionProjectorPath = [string]$DeploymentConfig.VisionProjectorPath
         ModelUserRepo   = [string]$DeploymentConfig.UserRepo
         FirewallAction  = $FirewallAction
     }
@@ -1023,7 +1140,7 @@ function Invoke-ElevatedFirewallSetup {
                 'Disable' { $null = Remove-LMStudioFirewallRules; 0 }
                 default   { 0 }
             }
-            $script:CreatedManagedModelLink = $null
+            $script:CreatedManagedModelLinks = @()
             return $count
         }
 
@@ -1120,7 +1237,7 @@ function Invoke-FirewallOnlyMode {
         }
 
         $request = Read-JsonFile -Path $requestFullPath
-        if ((Get-PropertyValue -InputObject $request -Name 'SchemaVersion') -ne 4) {
+        if ((Get-PropertyValue -InputObject $request -Name 'SchemaVersion') -ne 5) {
             throw 'Firewall 要求ファイルのバージョンを認識できません。'
         }
 
@@ -1141,6 +1258,12 @@ function Invoke-FirewallOnlyMode {
         $lmsPath = [IO.Path]::GetFullPath([string](Get-PropertyValue -InputObject $request -Name 'LmsPath'))
         $homePath = [IO.Path]::GetFullPath([string](Get-PropertyValue -InputObject $request -Name 'LmStudioHomePath'))
         $modelSourcePath = [IO.Path]::GetFullPath([string](Get-PropertyValue -InputObject $request -Name 'ModelSourcePath'))
+        $visionProjectorSetting = [string](Get-PropertyValue -InputObject $request -Name 'VisionProjectorPath')
+        $visionProjectorPath = if ([string]::IsNullOrWhiteSpace($visionProjectorSetting)) {
+            ''
+        } else {
+            [IO.Path]::GetFullPath($visionProjectorSetting)
+        }
         $modelUserRepo = [string](Get-PropertyValue -InputObject $request -Name 'ModelUserRepo')
         $firewallAction = [string](Get-PropertyValue -InputObject $request -Name 'FirewallAction')
         if ($firewallAction -notin @('Enable', 'Disable', 'Skip')) {
@@ -1150,11 +1273,17 @@ function Invoke-FirewallOnlyMode {
             -not (Test-Path -LiteralPath $homePath -PathType Container) -or
             -not (Test-Path -LiteralPath $modelSourcePath -PathType Leaf) -or
             -not [string]::Equals([IO.Path]::GetExtension($modelSourcePath), '.gguf', [StringComparison]::OrdinalIgnoreCase) -or
+            [IO.Path]::GetFileName($modelSourcePath) -match '^(?i:mmproj(?:[-_.].*)?\.gguf)$' -or
+            (-not [string]::IsNullOrWhiteSpace($visionProjectorPath) -and (
+                -not (Test-Path -LiteralPath $visionProjectorPath -PathType Leaf) -or
+                [IO.Path]::GetFileName($visionProjectorPath) -notmatch '^(?i:mmproj(?:[-_.].*)?\.gguf)$'
+            )) -or
             $modelUserRepo -notmatch '^secure-deployment/[A-Za-z0-9._-]+$') {
             throw '共有モデル登録要求の内容を検証できません。'
         }
         $deploymentConfig = [pscustomobject]@{
             SourcePath = $modelSourcePath
+            VisionProjectorPath = $visionProjectorPath
             UserRepo = $modelUserRepo
         }
 
@@ -1169,7 +1298,7 @@ function Invoke-FirewallOnlyMode {
             'Disable' { $null = Remove-LMStudioFirewallRules; 0 }
             default   { 0 }
         }
-        $script:CreatedManagedModelLink = $null
+        $script:CreatedManagedModelLinks = @()
         if ($firewallAction -eq 'Enable') {
             Write-SetupLog -Level OK -Message "Firewall 規則を検証しました: $count 件"
         }
@@ -1485,7 +1614,12 @@ function Invoke-MainSetup {
     Assert-NoActiveSetupRequest -SetupRoot $script:SetupRoot
 
     $deploymentConfig = Read-DeploymentModelConfig -ConfigPath $DeploymentConfigPath
-    Write-SetupLog -Level OK -Message '配布設定から共有フォルダ上の1つのGGUFを確認しました（パスは記録しません）。'
+    $modelPackageDescription = if ($deploymentConfig.VisionProjectorConfigured) {
+        '1つのモデル本体GGUFと1つの画像プロジェクターGGUF'
+    } else {
+        '1つのモデル本体GGUF'
+    }
+    Write-SetupLog -Level OK -Message "配布設定から${modelPackageDescription}を確認しました（共有元パスは記録しません）。"
     Write-SetupLog -Message ("本プロジェクトのFirewall規則: {0}" -f $deploymentConfig.ProjectFirewall)
 
     $exePath = Get-LMStudioExecutablePath -RequestedPath $LmStudioExePath
@@ -1512,6 +1646,10 @@ function Invoke-MainSetup {
         -LmStudioHomePath $homePath `
         -DeploymentConfig $deploymentConfig
     $modelLinkExistedBefore = Test-Path -LiteralPath ([string]$modelLinkInfo.LinkPath)
+    $visionProjectorLinkExistedBefore = (
+        -not [string]::IsNullOrWhiteSpace([string]$modelLinkInfo.VisionProjectorLinkPath) -and
+        (Test-Path -LiteralPath ([string]$modelLinkInfo.VisionProjectorLinkPath))
+    )
 
     $programPaths = @(Get-LMStudioProgramPaths -ExePath $exePath -HomePath $homePath)
     if ($programPaths.Count -eq 0) {
@@ -1563,13 +1701,23 @@ function Invoke-MainSetup {
     }
     if (-not $modelLinkExistedBefore -and
         (Test-Path -LiteralPath ([string]$modelLinkInfo.LinkPath))) {
-        $script:CreatedManagedModelLink = [string]$modelLinkInfo.LinkPath
+        Add-CreatedManagedModelLink -LinkPath ([string]$modelLinkInfo.LinkPath)
+    }
+    if (-not $visionProjectorLinkExistedBefore -and
+        -not [string]::IsNullOrWhiteSpace([string]$modelLinkInfo.VisionProjectorLinkPath) -and
+        (Test-Path -LiteralPath ([string]$modelLinkInfo.VisionProjectorLinkPath))) {
+        Add-CreatedManagedModelLink -LinkPath ([string]$modelLinkInfo.VisionProjectorLinkPath)
     }
     $modelRegistration = Register-DeploymentModel `
         -LmsPath $lmsPath `
         -LmStudioHomePath $homePath `
         -DeploymentConfig $deploymentConfig
-    Write-SetupLog -Level OK -Message '共有モデルをLM Studio標準モデル領域へリンク登録しました。'
+    $registrationDescription = if ($deploymentConfig.VisionProjectorConfigured) {
+        '共有モデル本体と画像プロジェクター'
+    } else {
+        '共有モデル'
+    }
+    Write-SetupLog -Level OK -Message "${registrationDescription}をLM Studio標準モデル領域へリンク登録しました。"
 
     $stillRunning = @(Get-RunningLMStudioProcesses -ExePath $exePath -HomePath $homePath)
     if ($stillRunning.Count -gt 0) {
@@ -1604,7 +1752,7 @@ function Invoke-MainSetup {
 
     $completedAtUtc = [DateTime]::UtcNow.ToString('o')
     $state = [ordered]@{
-        SchemaVersion          = 4
+        SchemaVersion          = 5
         Complete               = $firewallReady
         CompletedAtUtc         = $completedAtUtc
         AllowedModelRequested  = $AllowedModel
@@ -1614,6 +1762,13 @@ function Invoke-MainSetup {
         ModelValidationPending = $true
         ProvisioningMode       = 'ManagedSymbolicLink'
         ManagedModelLinkPath   = [string]$modelRegistration.LinkPath
+        ManagedModelSourcePathSha256 = Get-AbsolutePathIdentitySha256 -Path ([string]$deploymentConfig.SourcePath)
+        VisionProjectorConfigured = [bool]$deploymentConfig.VisionProjectorConfigured
+        ManagedVisionProjectorLinkPath = [string]$modelRegistration.VisionProjectorLinkPath
+        ManagedVisionProjectorSourcePathSha256 = if ($deploymentConfig.VisionProjectorConfigured) {
+            Get-AbsolutePathIdentitySha256 -Path ([string]$deploymentConfig.VisionProjectorPath)
+        } else { '' }
+        VisionEnabled          = $null
         ModelFormat            = 'gguf'
         RequiredRuntime        = $RequiredRuntime
         OmitLoadEstimate        = [bool]$SkipLoadEstimate
@@ -1655,7 +1810,7 @@ function Invoke-MainSetup {
 
     $statePath = Join-Path $script:SetupRoot 'setup-state.json'
     Write-SetupState -StatePath $statePath -State $state
-    $script:CreatedManagedModelLink = $null
+    $script:CreatedManagedModelLinks = @()
     Write-SetupLog -Level OK -Message "状態ファイルを保存しました: $statePath"
 
     if ($firewallConfigured) {
@@ -1672,6 +1827,7 @@ function Invoke-MainSetup {
     Write-Host '============================================================'
     Write-Host ' LM Studio secure setup result'
     Write-Host ' Model     : PENDING FIRST SECURE LAUNCH'
+    Write-Host (' Vision    : {0}' -f $(if ($deploymentConfig.VisionProjectorConfigured) { 'PROJECTOR CONFIGURED / PENDING VALIDATION' } else { 'NO SEPARATE PROJECTOR / PENDING DETECTION' }))
     $firewallSummary = if ($firewallConfigured) { 'ON / LOCALHOST ONLY' } elseif ($firewallExternallyManaged) { 'OFF / EXTERNAL PROTECTION NOT VERIFIED HERE' } else { 'SKIPPED / INCOMPLETE' }
     Write-Host (' Firewall  : {0}' -f $firewallSummary)
     Write-Host ' Public API: AUTOSTART OFF / LOOPBACK ONLY'

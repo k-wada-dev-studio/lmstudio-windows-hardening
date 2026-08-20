@@ -16,7 +16,7 @@ check. See the official [CLI documentation](https://lmstudio.ai/docs/cli).
 
 Setup never downloads them. The deployment owner should confirm
 `config/deployment.local.psd1` points to an accessible folder containing exactly
-one top-level GGUF, and that a compatible runtime is already installed. Users do
+one primary top-level GGUF and at most one matching `mmproj-*.gguf`, and that a compatible runtime is already installed. Users do
 not need to discover or enter a `modelKey`.
 
 ## Shared-model symbolic-link registration fails
@@ -33,6 +33,17 @@ the source model.
 This project intentionally enforces a single-LLM policy. Remove or archive the
 other LLMs outside the active LM Studio inventory, then run setup again. Embedding
 models are handled separately.
+
+## PDF works but image upload is unavailable
+
+PDF chat can extract text without the loaded LLM accepting image pixels. Image
+input requires a vision-capable model package. For split GGUF distributions,
+place the model's matching `mmproj-*.gguf` beside the primary GGUF and run setup
+again. Setup accepts one primary plus one projector as one approved model; it
+rejects multiple projector variants. The first secure launch must report
+`vision: true`. If it still reports false, verify that the primary model,
+projector, runtime, and LM Studio version are mutually compatible. See LM
+Studio's official [image input documentation](https://lmstudio.ai/docs/python/llm-prediction/image-input).
 
 ## Firewall setup is refused
 
