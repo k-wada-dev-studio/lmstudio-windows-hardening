@@ -1,5 +1,49 @@
 # Troubleshooting
 
+## One-click preview rejects the installer
+
+Do not bypass the check. Confirm the staged file, SHA-256, product version, and
+signer-certificate thumbprint in the private deployment configuration. A vendor
+certificate renewal requires a new deployment-owner trust decision.
+
+## One-click install reports a version mismatch immediately after installation
+
+Some LM Studio Windows builds expose the installed `LM Studio.exe` version as an
+empty value or a Windows-normalized numeric `ProductVersion`; the exact release
+remains in `FileVersion`. Current code handles that vendor packaging difference
+by requiring the exact file or product version and all three independent installed
+signals to agree: the executable's Authenticode signer thumbprint,
+`resources\app\package.json`, and the current-user Windows uninstall registration.
+Do not weaken or remove those checks. Update the package and re-run the same
+`0-Install-and-Setup.cmd`; the correctly installed fixed version is reused rather
+than installed again.
+
+## One-click runtime provisioning fails
+
+`OnlinePinned` requires temporary external access for the exact configured
+runtime. Re-run the same `0-Install-and-Setup.cmd`; completed installation and
+profile phases are revalidated instead of blindly repeated. If external access
+is forbidden, have the organization prepare the runtime independently and set
+`RuntimeProvisioning = 'Existing'`.
+
+## Complete uninstall preview is refused
+
+Close LM Studio, `lms`, `llmster`, and model runtimes first. The combined
+uninstaller also refuses an unknown application version, a changed signer,
+missing or inconsistent Windows uninstall registration, a reparse-point data
+root, or simultaneous normal and quarantine directories. Do not bypass those
+checks. Correct the reported state and rerun `6-Uninstall-and-Delete-All.cmd`.
+
+If the vendor uninstaller succeeded but data or project Firewall cleanup did
+not, rerunning is supported. Fixed quarantine directories are recognized.
+Shared-folder models are not cleanup targets.
+
+Some NSIS builds remove the application, uninstaller, and Windows registration
+but leave an empty `Programs\LM Studio` directory. Current code treats the vendor
+uninstall as successful once those three application signals disappear, verifies
+the remaining current-user install directory is both fixed and empty, and removes
+only that empty directory. A non-empty residue is never deleted automatically.
+
 ## Setup says LM Studio is still running
 
 Exit the GUI and tray/background service, then check Task Manager for LM Studio,

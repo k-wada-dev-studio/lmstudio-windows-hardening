@@ -606,6 +606,145 @@ try {
     Assert-Throws {
         Assert-ExactDefaultLMStudioProfile -HomePath $wrongHome -UserProfilePath $completeUserRoot
     } 'Complete deletion rejects a directory other than the fixed .lmstudio path'
+
+    foreach ($definition in @(Get-ScriptFunctionDefinitions -Path (Join-Path $repo 'src\Install-LMStudio.ps1'))) {
+        . $definition
+    }
+    $oneClickInstaller = Join-Path $tempRoot 'LM-Studio-pinned.exe'
+    [IO.File]::WriteAllText($oneClickInstaller, 'Nullsoft test installer fixture')
+    $oneClickConfigPath = Join-Path $tempRoot 'one-click-deployment.psd1'
+    $escapedOneClickInstaller = $oneClickInstaller.Replace("'", "''")
+    [IO.File]::WriteAllText(
+        $oneClickConfigPath,
+        "@{ ModelSourcePath = 'X:\model.gguf'; ProjectFirewall = 'ON'; InstallerPath = '$escapedOneClickInstaller'; InstallerSha256 = '$('A' * 64)'; InstallerProductVersion = '0.4.21+2'; InstallerSignerThumbprint = '$('B' * 40)'; RuntimeProvisioning = 'OnlinePinned'; RequiredRuntime = 'llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.2' }"
+    )
+    $oneClickConfig = Read-OneClickDeploymentConfig -ConfigPath $oneClickConfigPath
+    Assert-True ($oneClickConfig.ProjectFirewall -eq 'ON' -and $oneClickConfig.RuntimeProvisioning -eq 'OnlinePinned') 'One-click install reads explicit project Firewall and runtime provisioning modes'
+    Assert-True ($oneClickConfig.RequiredRuntime -eq 'llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.2') 'One-click install requires a complete pinned runtime identifier'
+    $runtimeArguments = @(Get-PinnedRuntimeGetArguments -RequiredRuntime $oneClickConfig.RequiredRuntime)
+    Assert-True (($runtimeArguments -join '|') -eq 'runtime|get|llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.2|-y') 'One-click install builds an exact non-interactive runtime command'
+    $runtimeListFixture = @"
+LLM ENGINE                                                     SELECTED    MODEL FORMAT
+llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.2                 ✓           gguf
+llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.20                            gguf
+"@
+    Assert-True (Test-RuntimeListContainsExact -ListText $runtimeListFixture -RequiredRuntime 'llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.2') 'One-click install recognizes the exact pinned runtime row'
+    Assert-True (-not (Test-RuntimeListContainsExact -ListText $runtimeListFixture -RequiredRuntime 'llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28')) 'One-click install does not accept a runtime identifier substring'
+    $bootstrapStatus = ConvertFrom-NativeJson `
+        -Text ("startup warning`r`n{`"status`":`"running`",`"isDaemon`":false}") `
+        -ExpectedRoot Object
+    Assert-True ($bootstrapStatus.status -eq 'running' -and -not $bootstrapStatus.isDaemon) 'One-click install extracts a GUI-ready status object even when native output has a warning prefix'
+    Assert-True (Test-InstallerIsNsis -Path $oneClickInstaller) 'One-click install recognizes only the tested NSIS installer format'
+
+    $oneClickModelRoot = Join-Path $tempRoot 'one-click-model-package'
+    New-Item -ItemType Directory -Path $oneClickModelRoot -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $oneClickModelRoot 'approved.gguf'), 'model')
+    [IO.File]::WriteAllText((Join-Path $oneClickModelRoot 'mmproj-approved.gguf'), 'projector')
+    $modelPackageSummary = Assert-OneClickModelPackage -Configuration ([pscustomobject]@{
+        ModelSourcePath = $oneClickModelRoot
+        VisionProjectorPath = $null
+    })
+    Assert-True ($modelPackageSummary.PrimaryCount -eq 1 -and $modelPackageSummary.ProjectorCount -eq 1) 'One-click preflight accepts exactly one model plus one projector before installation'
+    [IO.File]::WriteAllText((Join-Path $oneClickModelRoot 'unexpected.gguf'), 'other model')
+    Assert-Throws {
+        Assert-OneClickModelPackage -Configuration ([pscustomobject]@{
+            ModelSourcePath = $oneClickModelRoot
+            VisionProjectorPath = $null
+        })
+    } 'One-click preflight rejects multiple primary models before installation'
+
+    $script:MockFirewallProgram = 'C:\fixture\LM Studio.exe'
+    $script:BootstrapFirewallGroup = 'LM Studio Secure Bootstrap'
+    $script:MockFirewallProfile = 'Any'
+    $script:MockFirewallProtocol = 'Any'
+    $script:MockFirewallLocalPort = 'Any'
+    $script:MockFirewallRemotePort = 'Any'
+    $script:MockBootstrapExtraRule = $false
+    function script:Get-NetFirewallRule {
+        param([string]$Name, [string]$Group)
+        if (-not [string]::IsNullOrWhiteSpace($Group)) {
+            $groupRules = @(
+                [pscustomobject]@{ Name = 'LMStudioBootstrap-Outbound-fixture'; Group = $script:BootstrapFirewallGroup },
+                [pscustomobject]@{ Name = 'LMStudioBootstrap-Inbound-fixture'; Group = $script:BootstrapFirewallGroup }
+            )
+            if ($script:MockBootstrapExtraRule) {
+                $groupRules += [pscustomobject]@{ Name = 'unexpected'; Group = $script:BootstrapFirewallGroup }
+            }
+            return $groupRules
+        }
+        $direction = if ($Name -match 'Outbound') { 'Outbound' } else { 'Inbound' }
+        return [pscustomobject]@{
+            Name = $Name
+            Enabled = 'True'
+            Action = 'Block'
+            Direction = $direction
+            Group = $script:BootstrapFirewallGroup
+            Profile = $script:MockFirewallProfile
+        }
+    }
+    Assert-True ((Test-BootstrapFirewallRules -ProgramPath $script:MockFirewallProgram) -eq 2) 'One-click bootstrap Firewall audit accepts the complete all-traffic rule shape'
+    $script:MockFirewallProtocol = 'TCP'
+    Assert-Throws { Test-BootstrapFirewallRules -ProgramPath $script:MockFirewallProgram } 'One-click bootstrap Firewall audit rejects a TCP-only rule'
+    $script:MockFirewallProtocol = 'Any'
+    $script:MockBootstrapExtraRule = $true
+    Assert-Throws { Test-BootstrapFirewallRules -ProgramPath $script:MockFirewallProgram } 'One-click bootstrap Firewall audit rejects an unexpected rule in its group'
+    $script:MockBootstrapExtraRule = $false
+
+    [IO.File]::WriteAllText(
+        $oneClickConfigPath,
+        "@{ ModelSourcePath = 'X:\model.gguf'; InstallerPath = '$escapedOneClickInstaller'; InstallerSha256 = '$('A' * 64)'; InstallerProductVersion = '0.4.21+2'; InstallerSignerThumbprint = '$('B' * 40)'; RuntimeProvisioning = 'OnlinePinned'; RequiredRuntime = 'not-version-pinned' }"
+    )
+    Assert-Throws {
+        Read-OneClickDeploymentConfig -ConfigPath $oneClickConfigPath
+    } 'One-click install rejects a runtime that is not pinned to an exact version'
+
+    [IO.File]::WriteAllText(
+        $oneClickConfigPath,
+        "@{ ModelSourcePath = 'X:\model.gguf'; InstallerPath = '$escapedOneClickInstaller'; InstallerSha256 = '$('A' * 64)'; InstallerProductVersion = '0.4.21+2'; InstallerSignerThumbprint = '$('B' * 40)'; RequiredRuntime = 'llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.2' }"
+    )
+    Assert-Throws {
+        Read-OneClickDeploymentConfig -ConfigPath $oneClickConfigPath
+    } 'One-click install requires an explicit runtime provisioning policy before any download'
+
+    foreach ($definition in @(Get-ScriptFunctionDefinitions -Path (Join-Path $repo 'src\Uninstall-LMStudio.ps1'))) {
+        . $definition
+    }
+    $uninstallPolicy = Read-UninstallPolicy -ConfigPath $oneClickConfigPath
+    Assert-True ($uninstallPolicy.ProductVersion -eq '0.4.21+2' -and
+        $uninstallPolicy.SignerThumbprint -eq ('B' * 40)) 'Complete uninstall reads only pinned product identity from the private deployment policy'
+    $uninstallTargets = @(Get-CompleteUninstallDataTargets)
+    Assert-True ($uninstallTargets.Count -eq 3 -and
+        ($uninstallTargets.Key -join '|') -eq 'Profile|LegacyRoaming|UpdaterCache') 'Complete uninstall exposes exactly three fixed current-user data roots'
+    Assert-True ($uninstallTargets[0].Path -eq (Join-Path $env:USERPROFILE '.lmstudio')) 'Complete uninstall fixes the primary profile to the current user'
+    Assert-True ($uninstallTargets[1].Path -eq (Join-Path $env:APPDATA 'LM Studio')) 'Complete uninstall fixes legacy settings to the current roaming profile'
+    Assert-True ($uninstallTargets[2].Path -eq (Join-Path $env:LOCALAPPDATA 'lm-studio-updater')) 'Complete uninstall fixes updater data to the current local profile'
+    Assert-Throws {
+        Assert-FixedDataTarget -Target ([pscustomobject]@{
+            Key = 'Arbitrary'
+            Path = (Join-Path $tempRoot 'arbitrary')
+            QuarantinePath = (Join-Path $tempRoot 'arbitrary-quarantine')
+            Parent = $tempRoot
+            Name = 'arbitrary'
+            QuarantineName = 'arbitrary-quarantine'
+        })
+    } 'Complete uninstall rejects a data root outside its internal allowlist'
+    Assert-True ((Get-NormalizedDisplayIconPath -Value '"C:\fixture\LM Studio.exe",0') -eq 'C:\fixture\LM Studio.exe') 'Complete uninstall safely normalizes the registered display-icon path'
+    Assert-Throws {
+        Assert-CurrentUserInstallRoot -Path (Join-Path $tempRoot 'not-an-install-root')
+    } 'Complete uninstall rejects an application residue directory outside its fixed allowlist'
+
+    $uninstallDeleteRoot = Join-Path $tempRoot 'uninstall-link-safe-root'
+    $uninstallSharedTarget = Join-Path $tempRoot 'uninstall-shared-target'
+    New-Item -ItemType Directory -Path $uninstallDeleteRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $uninstallSharedTarget -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $uninstallDeleteRoot 'local.dat'), 'delete local')
+    [IO.File]::WriteAllText((Join-Path $uninstallSharedTarget 'shared.gguf'), 'preserve shared')
+    New-Item -ItemType Junction -Path (Join-Path $uninstallDeleteRoot 'shared-link') -Target $uninstallSharedTarget -ErrorAction Stop | Out-Null
+    $uninstallTreeSummary = Get-DirectoryTreeSummaryWithoutFollowingLinks -RootPath $uninstallDeleteRoot
+    Assert-True ($uninstallTreeSummary.FileCount -eq 1 -and $uninstallTreeSummary.LinkCount -eq 1) 'Complete uninstall inventory does not traverse a shared-model junction'
+    Remove-DirectoryTreeWithoutFollowingLinks -RootPath $uninstallDeleteRoot
+    Assert-True (-not (Test-Path -LiteralPath $uninstallDeleteRoot) -and
+        (Test-Path -LiteralPath (Join-Path $uninstallSharedTarget 'shared.gguf') -PathType Leaf)) 'Complete uninstall deletes a model link without deleting its shared target'
 }
 finally {
     $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

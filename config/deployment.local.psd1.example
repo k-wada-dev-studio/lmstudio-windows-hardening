@@ -20,4 +20,16 @@
     # OFFへ切り替えてSetupを再実行すると、本プロジェクトが以前作った規則だけを削除します。
     # Windows Firewall本体や会社側の規則をON/OFFする設定ではありません。
     ProjectFirewall = 'OFF'
+
+    # 0-Install-and-Setup.cmdを使う場合の、配布済みLM Studioインストーラーです。
+    # スクリプトはダウンロードせず、SHA-256、電子署名、製品バージョンを検証します。
+    InstallerPath = '\\SERVER\Share\Packages\LM-Studio-x64.exe'
+    InstallerSha256 = '<64-character-SHA-256>'
+    InstallerProductVersion = '0.4.21+2'
+    InstallerSignerThumbprint = '<40-character-certificate-thumbprint>'
+
+    # OnlinePinned: 下記の完全指定Runtimeだけを公式CLIで自動取得・選択します。
+    # Existing    : ダウンロードせず、事前導入済みの完全一致Runtimeを要求します。
+    RuntimeProvisioning = 'OnlinePinned'
+    RequiredRuntime = 'llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.28.2'
 }

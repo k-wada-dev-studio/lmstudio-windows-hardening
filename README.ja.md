@@ -17,13 +17,15 @@
 
 配布管理者が共有フォルダ上の **1つだけのモデル** をセットアップ専用の非公開配布設定へ
 登録しておきます。内訳はモデル本体GGUFが1つ、画像入力対応モデルでは対応する
-`mmproj-*.gguf` が最大1つです。利用者は事前に LM Studio と対応 Runtime をインストールしてください。
-このプロジェクトはモデルや Runtime をダウンロードしません。
+`mmproj-*.gguf` が最大1つです。配布管理者は、署名・ハッシュ・バージョンを固定したLM Studio
+インストーラーと、完全指定したRuntime IDも非公開配布設定へ登録します。
 
-1. LM Studio を完全に終了します。
-2. `1-Setup.cmd` をダブルクリックします。
-3. Windows の管理者確認が表示されたら、モデルリンク登録（`ProjectFirewall = 'ON'` ではFirewall設定も含む）のために許可します。
-4. 完了後、普段は `2-Start-Secure.cmd` をダブルクリックして起動します。
+1. `0-Install-and-Setup.cmd` をダブルクリックします。
+2. Windows の管理者確認が表示されたら、初回通信保護、モデルリンク登録、Firewall設定のために許可します。
+3. インストール、初期化、Runtime準備、Setup、承認モデルのロードまで自動完了します。
+4. 以後は `2-Start-Secure.cmd` をダブルクリックして起動します。
+
+LM StudioとRuntimeをすでに準備済みの従来運用では、`1-Setup.cmd`から開始できます。
 
 セットアップがモデル本体と任意の画像プロジェクターを管理用シンボリックリンクとして自動登録し、最初の安全起動がその `modelKey` と LM Studio が報告する画像入力対応状態を検証・保存します。
 利用者がモデル名を調べたり、LM Studio の「My Models」やJSON設定を操作したりする必要はありません。
@@ -42,6 +44,11 @@ LM Studioをアンインストールした後、残ったユーザープロフ�
 対象件数と容量を表示した後、2段階の確認を要求します。共有フォルダを指すリンクはリンクだけを削除し、
 共有先のGGUF本体はたどりません。本プロジェクトのFirewall規則は変更しません。
 
+本体のアンインストールから全ローカルデータ削除までまとめて行う場合は、
+`6-Uninstall-and-Delete-All.cmd`を使用します。署名・バージョンを検証した公式アンインストーラーを
+実行し、`.lmstudio`、旧Roaming設定、Updaterキャッシュ、本プロジェクト所有Firewall規則を削除します。
+共有フォルダ上のGGUFは保持され、実行には`Y`と`UNINSTALL`の確認が必要です。
+
 これらの `.cmd` は同梱されたローカルの `.ps1` だけを起動します。PowerShellの
 `ExecutionPolicy Bypass` はその1回のプロセスだけに適用され、PC全体の実行ポリシーは変更しません。
 
@@ -59,7 +66,9 @@ LM Studioをアンインストールした後、残ったユーザープロフ�
 
 初期セットアップでは共有モデルリンク、選択したネットワーク管理状態、JSON保護を準備します。最初の安全起動時に
 GUI経由でモデルと互換Runtimeを検証・確定し、他モデルを拒否して承認モデルだけをロードします。
-モデル、Runtime、アプリをスクリプトがダウンロードすることはありません。
+`0-Install-and-Setup.cmd` はLM Studioインストーラーやモデルをダウンロードせず、配布済みファイルだけを
+使用します。`RuntimeProvisioning = 'OnlinePinned'`の場合だけ、完全指定したRuntimeを公式CLIから取得します。
+`1-Setup.cmd`と`2-Start-Secure.cmd`は従来どおりダウンロードを行いません。
 
 LM Studio 公式資料では、ダウンロード済みモデルによるチャット、ローカル文書チャット、
 ローカルサーバーはオフライン動作できる一方、検索、ダウンロード、Runtime 取得、更新確認は
@@ -72,9 +81,9 @@ LM Studio 公式資料では、ダウンロード済みモデルによるチャ�
 - Windows 10 または 11
 - `ProjectFirewall = 'ON'`ではWindows Firewallが有効、`'OFF'`では配布責任者が会社側の保護を別途確認済み
 - Windows PowerShell 5.1
-- LM Studio を一度は初期化済み
-- 共有フォルダ上のモデル本体GGUF（画像入力を使う場合は対応する `mmproj-*.gguf` も）へアクセス可能で、互換 Runtime をインストール済み
-- `lms` CLI が利用可能
+- `0`を使う場合は、配布固定したLM Studioインストーラーと完全指定Runtime IDを設定済み
+- `1`から始める場合は、LM Studio、互換Runtime、`lms` CLIを準備済み
+- 共有フォルダ上のモデル本体GGUF（画像入力を使う場合は対応する `mmproj-*.gguf` も）へアクセス可能
 - セットアップと復元の実行中は LM Studio と `llmster` を完全終了
 
 管理者確認が必要なのは短いモデルリンク登録と、本プロジェクトのFirewall規則をON/OFFする処理だけです。メインのスクリプトは、LM Studio を
@@ -92,17 +101,29 @@ LM Studio 公式資料では、ダウンロード済みモデルによるチャ�
 複数のモデル本体や複数のmmprojは安全のため拒否します。このローカル設定は `.gitignore` の対象なので、共有先の名前を
 GitHubへ公開しません。設定済みパッケージを受け取る利用者には、この作業は不要です。
 
+ワンクリック導入では、さらに`InstallerPath`、`InstallerSha256`、`InstallerProductVersion`、
+`InstallerSignerThumbprint`、`RequiredRuntime`を固定します。`RuntimeProvisioning = 'OnlinePinned'`は
+初回だけRuntime取得の通信窓を開き、取得後に閉じます。完全オフライン配布では`'Existing'`を使い、
+Runtimeを事前導入します。
+
 セットアップ済みPCでも、LM Studioを終了して `ProjectFirewall` の `'ON'` / `'OFF'` を変更し、
 `1-Setup.cmd` を再実行すれば切り替えられます。`'OFF'` への切替時は、本プロジェクトが以前作成した
 `LM Studio Secure Local-Only` グループの規則だけを削除し、Windows Firewall本体や会社側の規則には触れません。
 
 ## PowerShellから実行する場合
 
-1. [脅威モデル](docs/THREAT-MODEL.md)と3本のスクリプトを確認します。
+1. [脅威モデル](docs/THREAT-MODEL.md)とスクリプトを確認します。
 2. 通常のインターネット接続が使える段階で、信頼できる公式配布元から LM Studio と対応
    Runtime を準備し、配布管理者が非公開配布設定を作成します。
 3. LM Studio と `llmster` を完全に終了します。
-4. 初期設定を実行します。共有GGUFの登録と `modelKey` の取得は自動です。
+4. ワンクリック導入をプレビューしてから実行します。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Install-LMStudio.ps1 -PreviewOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Install-LMStudio.ps1
+```
+
+既にLM StudioとRuntimeを準備済みの場合は、初期設定だけを実行できます。
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Setup-LMStudio.ps1
@@ -180,6 +201,26 @@ Firewallはプロファイル外のシステム設定なので変更しません
 
 ```powershell
 .\src\Remove-LMStudio-Profile.ps1 -PreviewOnly
+```
+
+## LM Studio本体を含む一括アンインストール
+
+`6-Uninstall-and-Delete-All.cmd`は、LM Studio本体がまだある状態から使用する一括版です。配布固定した
+製品バージョン、`LM Studio.exe`と公式アンインストーラーの電子署名、Electronの`package.json`、
+Windowsアンインストール登録を検証してから、公式サイレントアンインストーラーを実行します。
+
+本体とWindows登録が消えたことを確認した後、次の固定領域を隔離してから削除します。
+
+- `%USERPROFILE%\.lmstudio`
+- `%APPDATA%\LM Studio`（旧設定・移行元）
+- `%LOCALAPPDATA%\lm-studio-updater`
+- Firewallグループ `LM Studio Secure Local-Only` と `LM Studio Secure Bootstrap`
+
+ユーザーデータ内のシンボリックリンクやジャンクションは参照先をたどらないため、共有フォルダ上の
+モデル本体は削除されません。プレビューだけ行う場合は次を使用します。
+
+```powershell
+.\src\Uninstall-LMStudio.ps1 -PreviewOnly
 ```
 
 `setup-state.json` は手作業で編集しないでください。削除・破損・内容不一致がある場合、安全起動は

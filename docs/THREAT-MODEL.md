@@ -56,6 +56,10 @@ Firewall setup. Requests expire after fifteen minutes.
 - overly broad administrator execution when only model-link and Firewall work needs elevation
 - logs or backups being accidentally committed to the public repository
 - plaintext model/share paths being unnecessarily persisted in launch state
+- a substituted installer or runtime being accepted during automated provisioning
+- unbounded network access during first-use runtime acquisition
+- substituted uninstall commands, deletion of unrelated user directories, or
+  following shared-model links during complete removal
 
 ## Out of scope
 
@@ -85,6 +89,12 @@ Firewall setup. Requests expire after fifteen minutes.
 | Corrupt or foreign-profile restore source | Manifest type, location, target paths, JSON, and SHA-256 validation | Restore stops before changing live files |
 | Partial restore | Restore-safety backup and atomic replacement | Files are reverted; project-managed rules remain restrictive and external controls remain untouched |
 | UAC cancellation | Main work stays non-elevated | Setup remains incomplete or restore leaves blocking rules |
+| Installer substitution | SHA-256, valid Authenticode signature, pinned signer thumbprint, product name/version, and tested NSIS format | Installation stops before executing the file |
+| Runtime substitution or ambiguous selection | Exact `name@version` query, non-interactive selection, post-download inventory verification, and first-load compatibility check | Workflow stops without marking secure setup complete |
+| First-run provisioning traffic | Temporary non-loopback bootstrap block; `OnlinePinned` logs and opens a bounded runtime-only provisioning phase | Failure attempts graceful process shutdown and restores the bootstrap block |
+| Uninstaller substitution | Pinned version, Authenticode signer, package metadata, Windows registration, and a constructed fixed argument list | Complete uninstall stops before executing the vendor uninstaller |
+| Overbroad local-data deletion | Three exact current-user roots, same-parent quarantines, and a link-safe tree walk | Unknown paths and reparse-point roots are refused; shared targets are not followed |
+| Overbroad Firewall cleanup | Two exact project-owned Firewall groups handled by a short-lived hashed elevation request | Organization-owned and unrelated rules are not selected |
 
 ## Residual risk
 
