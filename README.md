@@ -35,6 +35,11 @@ contains the `modelKey` and a SHA-256 path identity, never the plaintext share
 path. Double-click `3-Restore.cmd` to restore the pre-setup configuration, or
 `Check-Package.cmd` to run package tests.
 
+To permanently delete chat history, chat attachments, LM Studio server logs,
+and this project's execution logs, fully close LM Studio and double-click
+`4-Delete-Private-Data.cmd`. It requires confirmation and keeps models,
+runtimes, settings, credentials, backups, and setup state.
+
 The command files only launch the bundled local `.ps1` files. Their
 `ExecutionPolicy Bypass` applies to that one PowerShell process and does not
 change the machine-wide execution policy.
@@ -158,6 +163,20 @@ not standard LM Studio files**.
 | `secure-setup\backups\` | This project | Pre-change and restore-safety JSON backups |
 | Firewall group `LM Studio Secure Local-Only` | This project | Created only when `ProjectFirewall = 'ON'`; blocks covered non-loopback traffic |
 
+## Delete private data
+
+`4-Delete-Private-Data.cmd` permanently clears only these four fixed locations:
+
+- `%USERPROFILE%\.lmstudio\conversations` — chat history
+- `%USERPROFILE%\.lmstudio\user-files` — chat attachments and metadata
+- `%USERPROFILE%\.lmstudio\server-logs` — LM Studio server logs
+- `%USERPROFILE%\.lmstudio\secure-setup\logs` — this project's setup, launch, and restore logs
+
+Restore remains a configuration-recovery operation and never silently erases
+history. Private-data deletion requires a separate confirmation, refuses
+symbolic links and junctions, and leaves unrelated LM Studio data unchanged.
+It is ordinary filesystem deletion, not cryptographic secure erasure.
+
 Do not edit `setup-state.json` manually. Missing, damaged, or inconsistent state
 causes the launcher to stop without starting LM Studio; re-run setup to recover.
 Backups and logs may contain prior settings, local paths, and model names, so never
@@ -226,8 +245,8 @@ See [Troubleshooting](docs/TROUBLESHOOTING.md) for common failures.
 ## Repository layout
 
 ```text
-*.cmd      Double-click entry points for setup, launch, restore, and checks
-src/       Setup, secure launch, and verified restore scripts
+*.cmd      Double-click entry points for setup, launch, restore, private-data deletion, and checks
+src/       Setup, secure launch, verified restore, and scoped private-data deletion scripts
 config/    Human-reviewable policy baseline
 docs/      Threat model and operating guidance
 tests/     Static and simulated behavior checks
