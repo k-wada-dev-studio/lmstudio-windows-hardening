@@ -1,0 +1,16 @@
+﻿@{
+    # 配布管理者が実際の共有フォルダまたはGGUFファイルのUNCパスへ変更し、
+    # deployment.local.psd1 という名前で保存してください。
+    # フォルダを指定した場合、その直下にあるGGUFが1つだけである必要があります。
+    ModelSourcePath = '\\SERVER\Share\Models'
+
+    # LM Studio標準モデル領域に作る管理用リンクの配置名です。
+    # 安全な復元範囲を限定するため、先頭の secure-deployment/ は変更しません。
+    ModelUserRepo = 'secure-deployment/approved-model'
+
+    # ON : このプロジェクトがWindows Firewall規則を作成・監査します（推奨）。
+    # OFF: 本プロジェクトの規則を使わず、会社側のFirewall/EDR等へ委任します。
+    # OFFへ切り替えてSetupを再実行すると、本プロジェクトが以前作った規則だけを削除します。
+    # Windows Firewall本体や会社側の規則をON/OFFする設定ではありません。
+    ProjectFirewall = 'ON'
+}

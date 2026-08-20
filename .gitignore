@@ -1,0 +1,32 @@
+# Local LM Studio data and secrets
+settings.json
+mcp.json
+config/deployment.local.psd1
+*.gguf
+*.safetensors
+models/
+
+# Runtime state, requests, logs, and backups
+secure-setup/
+logs/
+backups/
+setup-state.json
+*-request-*.json
+*.log
+*.replace-backup.*
+.*.tmp.*
+
+# Editors and operating systems
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Test and coverage output
+TestResults/
+coverage/
+*.trx

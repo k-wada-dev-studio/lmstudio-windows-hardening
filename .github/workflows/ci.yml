@@ -1,0 +1,32 @@
+name: PowerShell checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-windows-powershell:
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run static checks in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+          .\tests\Test-Static.ps1
+
+      - name: Run simulated behavior checks in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $OutputEncoding = [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+          .\tests\Test-Behavior.ps1

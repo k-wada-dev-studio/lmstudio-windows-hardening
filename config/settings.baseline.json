@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "lmstudio-secure-local-v1",
+  "description": "Security baseline for local-only LM Studio use. Apply as a property merge; do not replace the complete LM Studio settings file.",
+  "application": {
+    "name": "LM Studio",
+    "platform": "Windows",
+    "settingsPath": "%USERPROFILE%\\.lmstudio\\settings.json",
+    "mcpPath": "%USERPROFILE%\\.lmstudio\\mcp.json",
+    "httpServerConfigPath": "%USERPROFILE%\\.lmstudio\\.internal\\http-server-config.json"
+  },
+  "mergePolicy": {
+    "mode": "merge-enforced-values",
+    "preserveUnspecifiedProperties": true,
+    "rejectInvalidJson": true,
+    "requireBackupBeforeChange": true,
+    "requirePostWriteValidation": true,
+    "note": "LM Studio JSON files are internal formats. These values are defense-in-depth; an independently enforced network boundary remains required."
+  },
+  "settings": {
+    "developerMode": false,
+    "autoLoadBundledLLM": false,
+    "enableLocalService": false,
+    "useHFProxy": false,
+    "hfSearchToken": "",
+    "hfDownloadToken": "",
+    "developer": {
+      "showExperimentalFeatures": false,
+      "allowDevelopmentPlugins": false,
+      "autoUpdateExtensionPacks": false
+    }
+  },
+  "mcp": {
+    "mcpServers": {}
+  },
+  "httpServerConfig": {
+    "autoStartOnLaunch": false,
+    "networkInterface": "127.0.0.1"
+  },
+  "scope": {
+    "controlsExternalConnectivityByItself": false,
+    "requiresIndependentNetworkBoundary": true,
+    "allowsLoopbackOnly": true,
+    "downloadsModelsOrRuntimes": false,
+    "startsLocalApiServer": false
+  }
+}

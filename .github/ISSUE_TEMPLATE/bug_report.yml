@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible defect without disclosing sensitive local data
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach settings, MCP configuration, backups, full logs, tokens, model files, prompts, or private paths. Security issues must follow SECURITY.md instead of this public form.
+  - type: input
+    id: version
+    attributes:
+      label: Project version or commit
+      placeholder: 0.1.0-preview
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Redacted environment
+      description: Windows edition/build, PowerShell version, LM Studio version, and CPU/GPU class. Do not include your username.
+    validations:
+      required: true
+  - type: dropdown
+    id: script
+    attributes:
+      label: Affected script
+      options:
+        - Setup-LMStudio.ps1
+        - Start-LMStudio-Secure.ps1
+        - Restore-LMStudio.ps1
+        - Tests or documentation
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use placeholders for models and local paths.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and redacted error
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed usernames, tokens, prompts, local documents, model files, and private paths.
+          required: true
+        - label: This is not a security vulnerability; if it is, I will use the private process in SECURITY.md.
+          required: true
