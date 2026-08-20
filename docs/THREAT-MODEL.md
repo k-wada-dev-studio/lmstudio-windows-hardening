@@ -14,6 +14,7 @@ and lack of project verification explicit.
 - model and runtime inventory
 - access tokens and plugin/MCP configuration that may exist in old settings
 - the integrity of the approved-model decision
+- the integrity of an optional vision projector paired with the approved model
 - the integrity of the Windows host's network boundary
 
 ## Trust boundaries
@@ -78,7 +79,8 @@ Firewall setup. Requests expire after fifteen minutes.
 | Internal setting drift | Narrow merge of enforced values before setup/launch | Existing file is backed up; failed verification rolls back |
 | Public API exposure | Disable auto-start, save loopback bind address, then inspect actual listeners after GUI and model startup | Launch fails on any LM Studio-related non-loopback TCP listener |
 | Wrong model | Exact local inventory resolution and load verification | Launch unloads and stops; it does not substitute a model |
-| Model path changes | Setup-owned symbolic-link registration plus SHA-256 identity of the indexed path; plaintext share path is not saved in setup or launch state | Setup/launch stops instead of selecting another model |
+| Model or projector path changes | Setup-owned symbolic-link registration plus SHA-256 identities of link targets and the indexed model path; plaintext share paths are not saved in setup or launch state | Setup/launch stops instead of selecting another file |
+| Missing or incompatible vision projector | At most one `mmproj-*.gguf` is paired with the one primary GGUF; the first launch requires LM Studio to report `vision: true` and later launches detect capability drift | Launch stops instead of silently presenting a text-only model as image-capable |
 | Additional local LLM | Refused | User must remove it from the active inventory before setup or launch |
 | Corrupt or foreign-profile restore source | Manifest type, location, target paths, JSON, and SHA-256 validation | Restore stops before changing live files |
 | Partial restore | Restore-safety backup and atomic replacement | Files are reverted; project-managed rules remain restrictive and external controls remain untouched |

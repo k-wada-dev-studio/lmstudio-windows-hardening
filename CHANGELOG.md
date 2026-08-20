@@ -5,6 +5,13 @@ Versioning after the first stable release.
 
 ## Unreleased
 
+- Fix listener verification so outbound `ESTABLISHED` TCP connections are not
+  misclassified as non-loopback listening sockets.
+- Default `ProjectFirewall` to `OFF`, delegating network enforcement to the
+  organization unless the deployment owner explicitly selects project-managed rules.
+- Support one approved VLM package as a primary GGUF plus an optional matching
+  `mmproj-*.gguf`. Register, validate, record, and restore both managed links;
+  require LM Studio to report `vision: true` when a projector is configured.
 - Replace the deployment-facing Firewall mode names with the simpler
   `ProjectFirewall = 'ON'` / `'OFF'` switch. Switching to `OFF` during setup
   removes only this project's rule group and invalidates the old launch state

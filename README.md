@@ -17,17 +17,19 @@ enforce.
 
 ## Easiest way to use it
 
-A deployment owner first identifies exactly **one shared-folder GGUF** in the
-private deployment configuration. Users install LM Studio and its compatible
-runtime. This project downloads neither models nor runtimes.
+A deployment owner first identifies exactly **one model** in the private
+deployment configuration: one primary GGUF, plus at most one matching
+`mmproj-*.gguf` image projector when the model supports vision. Users install LM
+Studio and its compatible runtime. This project downloads neither models nor runtimes.
 
 1. Close LM Studio completely.
 2. Double-click `1-Setup.cmd`.
 3. Approve the single Windows administrator prompt for model-link setup (and Firewall setup when `ProjectFirewall = 'ON'`).
 4. For normal use, double-click `2-Start-Secure.cmd`.
 
-Setup automatically registers the shared GGUF through a symbolic link. The first
-secure GUI launch detects and saves its `modelKey`. Users do not look up a key or change My Models
+Setup automatically registers the primary GGUF and optional projector through
+managed symbolic links. The first secure GUI launch detects and saves its
+`modelKey` and verifies LM Studio's reported `vision` capability. Users do not look up a key or change My Models
 or LM Studio JSON settings. Another local LLM causes a safe stop. Saved state
 contains the `modelKey` and a SHA-256 path identity, never the plaintext share
 path. Double-click `3-Restore.cmd` to restore the pre-setup configuration, or
@@ -41,12 +43,12 @@ change the machine-wide execution policy.
 
 The project uses two layers:
 
-1. **Network protection ownership is explicit.** The default `ProjectFirewall = 'ON'`
-   mode uses Windows Firewall as the enforced boundary. Per-program inbound and
-   outbound block rules cover non-loopback IPv4 and IPv6 traffic for the LM
-   Studio GUI, CLI/daemon, and discovered runtime executables. `ProjectFirewall = 'OFF'`
+1. **Network protection ownership is explicit.** The default `ProjectFirewall = 'OFF'`
    delegates enforcement to organizational Firewall, EDR, or network policy;
-   this project neither creates nor audits those external controls.
+   this project neither creates nor audits those external controls. Selecting
+   `ProjectFirewall = 'ON'` makes Windows Firewall the project-verified boundary.
+   Per-program inbound and outbound block rules then cover non-loopback IPv4 and
+   IPv6 traffic for the LM Studio GUI, CLI/daemon, and discovered runtime executables.
 2. **LM Studio JSON settings are defense in depth.** A small set of network,
    development-plugin, MCP, and automatic-loading settings is reset before use.
    Unrelated JSON properties are preserved. Public API auto-start is disabled,
@@ -71,7 +73,7 @@ acquisition, and update checks require connectivity. See the official
 - Windows PowerShell 5.1
 - LM Studio initialized at least once
 - deployment configuration prepared by the package owner
-- the approved shared GGUF reachable and compatible runtime installed
+- the approved primary GGUF (and its matching `mmproj-*.gguf` for image input) reachable and compatible runtime installed
 - `lms` CLI available
 - LM Studio and `llmster` fully closed during setup and restore
 
@@ -83,11 +85,14 @@ Studio user.
 
 Copy `config\deployment.local.psd1.example` to
 `config\deployment.local.psd1`, then set `ModelSourcePath` to the UNC path of
-the shared folder or GGUF file. Set `ProjectFirewall` to `'ON'` (the
-recommended default) for project-created rules, or `'OFF'` only when
-the deployment owner has separately verified organizational enforcement. External
-management is an explicit delegation, not a request to disable protection. A
-folder must contain exactly one top-level GGUF. The local file is gitignored so the private share name is not published. Users
+the shared folder or GGUF file. `ProjectFirewall` defaults to `'OFF'`, which
+delegates enforcement to the organization and is not a verified network block by
+this project. Select `'ON'` when this project should create and audit its own
+Windows Firewall rules. External management is an explicit delegation, not a request to disable protection. A
+folder must contain exactly one top-level primary GGUF and may contain one
+top-level `mmproj-*.gguf`. More than one primary or projector is rejected. When
+`ModelSourcePath` names the primary file directly, the optional projector can be
+set with `VisionProjectorPath`. The local file is gitignored so the private share name is not published. Users
 who receive the configured package do not perform this step.
 
 To change an already configured PC, close LM Studio, edit `ProjectFirewall`, and
@@ -145,7 +150,7 @@ not standard LM Studio files**.
 | `%USERPROFILE%\.lmstudio\mcp.json` | LM Studio | Empties `mcpServers` after backup |
 | `%USERPROFILE%\.lmstudio\.internal\http-server-config.json` | LM Studio internal | If present, disables API auto-start and binds the saved configuration to loopback after backup |
 | `config\deployment.local.psd1` | Deployment owner | Private share location; gitignored and not user-edited |
-| `%USERPROFILE%\.lmstudio\models\secure-deployment\` | This project | Managed symbolic link to the shared GGUF |
+| `%USERPROFILE%\.lmstudio\models\secure-deployment\` | This project | Managed symbolic links to the primary GGUF and optional `mmproj` projector |
 | `%USERPROFILE%\.lmstudio\secure-setup\` | This project | Created on first setup as the managed area |
 | `secure-setup\setup-state.json` | This project | Setup result; approved-model identity and runtime validation are finalized only after the first successful secure launch |
 | `secure-setup\last-launch.json` | This project | Successful launch result and path identity hash |
@@ -170,6 +175,9 @@ on the actual PC after a secure launch.
   JSON policy, and selected network-management state succeed.
 - Model and runtime validation occurs during the first secure launch; verified state
   is committed only after the approved model loads successfully.
+- When a separate projector is configured, the first secure launch requires LM
+  Studio to report `vision: true`; later launches detect capability drift. A
+  one-file text-only deployment remains supported.
 - JSON changes use a validated temporary file, atomic replacement, backup, and
   rollback.
 - With `ProjectFirewall = 'ON'`, a secure launch refuses stale, missing, disabled, profile-limited,

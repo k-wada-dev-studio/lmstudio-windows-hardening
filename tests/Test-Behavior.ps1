@@ -74,8 +74,43 @@ try {
     $deploymentConfig = Read-DeploymentModelConfig -ConfigPath $deploymentConfigPath
     Assert-True ($deploymentConfig.SourcePath -eq $sharedModelFile) 'Setup resolves the only GGUF from deployment configuration without LM Studio UI input'
     Assert-True ($deploymentConfig.UserRepo -eq 'secure-deployment/approved-model') 'Setup uses the deployment-owned model repository name'
-    Assert-True ($deploymentConfig.ProjectFirewall -eq 'ON') 'Setup defaults omitted ProjectFirewall to ON'
-    Assert-True ($deploymentConfig.FirewallMode -eq 'ProjectManaged') 'Setup maps ProjectFirewall ON to project-managed enforcement'
+    Assert-True ($deploymentConfig.ProjectFirewall -eq 'OFF') 'Setup defaults omitted ProjectFirewall to OFF'
+    Assert-True ($deploymentConfig.FirewallMode -eq 'ExternallyManaged') 'Setup maps the default ProjectFirewall OFF to delegated enforcement'
+    Assert-True (-not $deploymentConfig.VisionProjectorConfigured -and [string]::IsNullOrWhiteSpace($deploymentConfig.VisionProjectorPath)) 'Setup keeps a one-file text model deployment compatible'
+
+    $visionProjectorFile = Join-Path $sharedModelRoot 'mmproj-F16.gguf'
+    [IO.File]::WriteAllText($visionProjectorFile, 'projector-fixture')
+    $visionDeploymentConfig = Read-DeploymentModelConfig -ConfigPath $deploymentConfigPath
+    Assert-True ($visionDeploymentConfig.SourcePath -eq $sharedModelFile -and $visionDeploymentConfig.VisionProjectorPath -eq $visionProjectorFile) 'Setup treats one model GGUF plus one mmproj GGUF as a single VLM package'
+    Assert-True $visionDeploymentConfig.VisionProjectorConfigured 'Setup records that a separate vision projector is configured'
+    $visionLinkInfo = Get-DeploymentModelLinkInfo -LmStudioHomePath (Join-Path $tempRoot 'link-profile') -DeploymentConfig $visionDeploymentConfig
+    Assert-True ([IO.Path]::GetFileName($visionLinkInfo.LinkPath) -eq 'approved.gguf') 'Setup keeps the primary model link distinct from the projector'
+    Assert-True ([IO.Path]::GetFileName($visionLinkInfo.VisionProjectorLinkPath) -eq 'mmproj-F16.gguf') 'Setup places the projector beside the primary model link'
+    [IO.File]::WriteAllText((Join-Path $sharedModelRoot 'mmproj-BF16.gguf'), 'second-projector-fixture')
+    Assert-Throws { Read-DeploymentModelConfig -ConfigPath $deploymentConfigPath } 'Setup rejects more than one vision projector for the single approved model'
+    [IO.File]::Delete((Join-Path $sharedModelRoot 'mmproj-BF16.gguf'))
+    [IO.File]::Delete($visionProjectorFile)
+
+    $explicitProjectorFile = Join-Path $tempRoot 'mmproj-explicit.gguf'
+    [IO.File]::WriteAllText($explicitProjectorFile, 'projector-fixture')
+    $escapedSharedModelFile = $sharedModelFile.Replace("'", "''")
+    $escapedExplicitProjector = $explicitProjectorFile.Replace("'", "''")
+    [IO.File]::WriteAllText(
+        $deploymentConfigPath,
+        "@{ ModelSourcePath = '$escapedSharedModelFile'; VisionProjectorPath = '$escapedExplicitProjector'; ModelUserRepo = 'secure-deployment/approved-model' }"
+    )
+    $explicitVisionConfig = Read-DeploymentModelConfig -ConfigPath $deploymentConfigPath
+    Assert-True ($explicitVisionConfig.VisionProjectorPath -eq $explicitProjectorFile) 'Setup accepts an explicit mmproj path when the primary model is configured as a file'
+    [IO.File]::WriteAllText(
+        $deploymentConfigPath,
+        "@{ ModelSourcePath = '$escapedSharedModelRoot'; VisionProjectorPath = '$escapedExplicitProjector'; ModelUserRepo = 'secure-deployment/approved-model' }"
+    )
+    Assert-Throws { Read-DeploymentModelConfig -ConfigPath $deploymentConfigPath } 'Setup rejects an explicit projector when folder auto-discovery is selected'
+    [IO.File]::Delete($explicitProjectorFile)
+    [IO.File]::WriteAllText(
+        $deploymentConfigPath,
+        "@{ ModelSourcePath = '$escapedSharedModelRoot'; ModelUserRepo = 'secure-deployment/approved-model' }"
+    )
     [IO.File]::WriteAllText(
         $deploymentConfigPath,
         "@{ ModelSourcePath = '$escapedSharedModelRoot'; ModelUserRepo = 'secure-deployment/approved-model'; ProjectFirewall = 'OFF' }"
@@ -231,11 +266,18 @@ try {
   TCP    [::]:9090              [::]:0                 LISTENING       200
   TCP    [::1]:61322            [::]:0                 LISTENING       200
   TCP    192.168.1.10:7777      0.0.0.0:0              LISTENING       999
+  TCP    192.168.1.10:50699     203.0.113.10:443        ESTABLISHED     100
 '@
     $nonLoopbackListeners = @(ConvertFrom-NetstatListeningEndpoints -Text $netstatFixture -ProcessIds @(100, 200))
     Assert-True ($nonLoopbackListeners.Count -eq 2) 'Launcher detects IPv4 and IPv6 wildcard listeners owned by LM Studio processes'
     Assert-True (@($nonLoopbackListeners | Where-Object { $_.Address -eq '0.0.0.0' -and $_.Port -eq 8080 }).Count -eq 1) 'Launcher reports the public IPv4 API listener'
     Assert-True (@($nonLoopbackListeners | Where-Object { $_.Address -eq '::' -and $_.Port -eq 9090 }).Count -eq 1) 'Launcher reports the public IPv6 API listener'
+    $establishedOnly = @(
+        ConvertFrom-NetstatListeningEndpoints `
+            -Text '  TCP    192.168.1.10:50699     203.0.113.10:443        ESTABLISHED     100' `
+            -ProcessIds @(100)
+    )
+    Assert-True ($establishedOnly.Count -eq 0) 'Launcher does not misclassify an outbound established connection as a listener'
 
     $legacyFirewallManagement = Get-FirewallManagementState -FirewallState ([pscustomobject]@{
         Configured = $true
@@ -343,7 +385,7 @@ try {
 
     $transitionStatePath = Join-Path $tempRoot 'transition-state.json'
     Write-Utf8Json -Path $transitionStatePath -Value ([ordered]@{
-        SchemaVersion = 4
+        SchemaVersion = 5
         Complete = $true
         Settings = [ordered]@{ BackupPath = 'C:\fixture\backup' }
     })
@@ -401,7 +443,15 @@ try {
     })
     Assert-True ((Find-ProvisionedModel -Models $firstLaunchInventory -ExpectedRepository 'secure-deployment/approved-model').modelKey -eq 'secure-deployment/approved-model') 'First secure GUI launch resolves the setup-managed repository without a pre-known modelKey'
     Assert-Throws { Find-ProvisionedModel -Models @($firstLaunchInventory + $firstLaunchInventory) -ExpectedRepository 'secure-deployment/approved-model' } 'First secure GUI launch rejects an ambiguous managed repository'
-    Assert-Throws { Assert-ManagedModelLink -LinkPath (Join-Path $tempRoot 'outside.gguf') -LmStudioHomePath (Join-Path $tempRoot 'profile') } 'Launcher rejects a managed-link path outside its dedicated model directory'
+    Assert-True (Get-ModelVisionEnabled -Model ([pscustomobject]@{ vision = $true }) -SourceDescription 'fixture') 'Launcher recognizes a vision-capable model'
+    Assert-True (-not (Get-ModelVisionEnabled -Model ([pscustomobject]@{ vision = $false }) -SourceDescription 'fixture')) 'Launcher recognizes a text-only model'
+    Assert-Throws { Get-ModelVisionEnabled -Model ([pscustomobject]@{}) -SourceDescription 'fixture' } 'Launcher fails closed when LM Studio does not report vision capability'
+    Assert-Throws {
+        Assert-ManagedModelLink `
+            -LinkPath (Join-Path $tempRoot 'outside.gguf') `
+            -LmStudioHomePath (Join-Path $tempRoot 'profile') `
+            -ExpectedTargetPathSha256 ('0' * 64)
+    } 'Launcher rejects a managed-link path outside its dedicated model directory'
 
     foreach ($definition in @(Get-ScriptFunctionDefinitions -Path (Join-Path $repo 'src\Restore-LMStudio.ps1'))) {
         . $definition

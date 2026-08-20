@@ -5,15 +5,17 @@
 Use trusted official sources while normal internet access is still available.
 
 1. Install and start LM Studio once so its profile and `lms` CLI are initialized.
-2. Install a compatible runtime and place the one intended GGUF on the approved
-   Windows shared folder.
+2. Install a compatible runtime and place one intended primary GGUF on the
+   approved Windows shared folder. For image input, also place exactly one
+   matching `mmproj-*.gguf` beside it. Do not place two projector variants there.
 3. As the deployment owner, copy `config/deployment.local.psd1.example` to the
    gitignored `config/deployment.local.psd1`, set `ModelSourcePath`, and select
-   `ProjectFirewall`. Keep the recommended `'ON'` unless the organization
-   already enforces and validates equivalent Firewall, EDR, or network controls;
-   only then select `'OFF'`. Users do
+   `ProjectFirewall`. The package default is `'OFF'`, which delegates network
+   enforcement to the organization and is not verified by this project. Select
+   `'ON'` when project-created and audited Windows Firewall rules are required. Users do
    not change LM Studio's My Models or JSON settings. Setup registers the shared
-   GGUF through a symbolic link and detects its `modelKey` automatically.
+   primary GGUF and optional projector through managed symbolic links and detects
+   its `modelKey` automatically.
 4. Close LM Studio, tray/background helpers, and `llmster` completely.
 5. Keep a separate recovery path to the original installer and documentation.
 
@@ -59,7 +61,7 @@ models are inventoried separately.
 Expected result:
 
 - Windows displays one UAC approval for the scoped model-link and project Firewall ON/OFF child operation
-- the shared model is link-registered; it is not moved, copied, loaded, or downloaded
+- the shared model package (primary GGUF and optional projector) is link-registered; it is not moved, copied, loaded, or downloaded
 - model and runtime validation is marked pending for the first secure GUI launch
 - a backup is created only if JSON values need to change
 - `secure-setup\setup-state.json` reports `Complete: true` and the selected Firewall mode
@@ -82,7 +84,8 @@ restricts its saved bind address to loopback, and starts LM Studio as the normal
 It rejects any actual LM Studio-related TCP listener outside loopback. On the
 first run it resolves the managed model and records the runtime/path hashes; later
 runs check them for drift. It unloads prior models, loads the approved model, and
-verifies its identity.
+verifies its identity and reported vision capability. A configured projector must
+produce `vision: true` or the launch fails closed.
 If any check fails, treat the refusal as a security signal rather than bypassing
 the script.
 
@@ -128,7 +131,7 @@ The restore sequence is deliberately conservative:
 2. verify the original backup and hashes
 3. back up current files to `restore-safety-*`
 4. restore JSON and mark secure launch incomplete
-5. remove only the recorded symbolic link below the project-owned model directory
+5. remove only the recorded primary-model and optional projector symbolic links below the project-owned model directory
 6. when project Firewall is `ON`, keep the fixed managed Firewall group by default and
    remove it only with `-RemoveFirewall`; when it is `OFF`, leave organization-owned controls unchanged
 
@@ -148,6 +151,7 @@ Before tagging a stable release, test on a disposable Windows machine:
 - both `ProjectFirewall = 'ON'` and `'OFF'`, including contradictory or unknown saved mode state
 - LM Studio running during setup/restore
 - allowed model missing, duplicate, and extra LLM present
+- text-only model, valid model-plus-mmproj image input, missing/mismatched projector, and two projectors
 - compatible runtime present, missing, and changed after setup
 - application/runtime update introducing a new executable
 - launch success, load timeout, and wrong loaded identifier

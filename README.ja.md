@@ -15,8 +15,9 @@
 
 ## いちばん簡単な使い方
 
-配布管理者が共有フォルダ上の **1つだけのGGUF** をセットアップ専用の非公開配布設定へ
-登録しておきます。利用者は事前に LM Studio と対応 Runtime をインストールしてください。
+配布管理者が共有フォルダ上の **1つだけのモデル** をセットアップ専用の非公開配布設定へ
+登録しておきます。内訳はモデル本体GGUFが1つ、画像入力対応モデルでは対応する
+`mmproj-*.gguf` が最大1つです。利用者は事前に LM Studio と対応 Runtime をインストールしてください。
 このプロジェクトはモデルや Runtime をダウンロードしません。
 
 1. LM Studio を完全に終了します。
@@ -24,7 +25,7 @@
 3. Windows の管理者確認が表示されたら、モデルリンク登録（`ProjectFirewall = 'ON'` ではFirewall設定も含む）のために許可します。
 4. 完了後、普段は `2-Start-Secure.cmd` をダブルクリックして起動します。
 
-セットアップが共有GGUFをシンボリックリンクとして自動登録し、最初の安全起動がその `modelKey` を検出・保存します。
+セットアップがモデル本体と任意の画像プロジェクターを管理用シンボリックリンクとして自動登録し、最初の安全起動がその `modelKey` と LM Studio が報告する画像入力対応状態を検証・保存します。
 利用者がモデル名を調べたり、LM Studio の「My Models」やJSON設定を操作したりする必要はありません。
 別のローカル LLM がある場合は、最初の安全起動で誤選択せず停止します。確定後の状態には `modelKey` とパス照合用
 SHA-256だけを保存し、共有フォルダのパスそのものは保存しません。
@@ -39,10 +40,10 @@ SHA-256だけを保存し、共有フォルダのパスそのものは保存し�
 
 防御を次の2層に分けています。
 
-1. **ネットワーク保護の管理方法を明示します。** 既定の `ProjectFirewall = 'ON'` では、Windows
-   Firewallを強制境界として、LM StudioのGUI、CLI/daemon、検出したRuntime実行ファイルごとに
-   ループバック以外のIPv4/IPv6通信を送受信とも遮断します。`ProjectFirewall = 'OFF'` では、会社側の
+1. **ネットワーク保護の管理方法を明示します。** 既定の `ProjectFirewall = 'OFF'` では、会社側の
    Firewall/EDR/ネットワークポリシーへ委任し、本プロジェクトの規則を作成・監査しません。
+   `ProjectFirewall = 'ON'` を明示した場合は、Windows Firewallを強制境界として、LM StudioのGUI、
+   CLI/daemon、検出したRuntime実行ファイルごとにループバック以外のIPv4/IPv6通信を送受信とも遮断します。
 2. **LM Studio の JSON 設定を補助防御にします。** 通信、開発プラグイン、MCP、自動ロードに
    関係する一部項目だけを安全側へ戻し、無関係な項目は保持します。公開APIサーバーの
    自動起動を無効化し、明示的に起動する場合の保存済み待受け先も `127.0.0.1` に固定します。
@@ -63,7 +64,7 @@ LM Studio 公式資料では、ダウンロード済みモデルによるチャ�
 - `ProjectFirewall = 'ON'`ではWindows Firewallが有効、`'OFF'`では配布責任者が会社側の保護を別途確認済み
 - Windows PowerShell 5.1
 - LM Studio を一度は初期化済み
-- 共有フォルダ上の1つのGGUFへアクセス可能で、互換 Runtime をインストール済み
+- 共有フォルダ上のモデル本体GGUF（画像入力を使う場合は対応する `mmproj-*.gguf` も）へアクセス可能で、互換 Runtime をインストール済み
 - `lms` CLI が利用可能
 - セットアップと復元の実行中は LM Studio と `llmster` を完全終了
 
@@ -73,11 +74,13 @@ LM Studio 公式資料では、ダウンロード済みモデルによるチャ�
 ### 配布管理者が1度だけ行う準備
 
 `config\deployment.local.psd1.example` を `config\deployment.local.psd1` としてコピーし、
-`ModelSourcePath` に共有フォルダまたはGGUFファイルのUNCパスを設定します。さらに `ProjectFirewall` を、
-本プロジェクトで規則を管理する `'ON'`（既定・推奨）か、会社側へ委任する
-`'OFF'` のどちらかに設定します。`'OFF'` はWindows Firewall本体を無効にする指定ではなく、
+`ModelSourcePath` に共有フォルダまたはGGUFファイルのUNCパスを設定します。`ProjectFirewall` の既定値は、
+会社側へ委任する `'OFF'` です。本プロジェクト自身にWindows Firewall規則を作成・監査させる場合は
+`'ON'` を明示します。`'OFF'` は通信を遮断済みという意味でもWindows Firewall本体を無効にする指定でもなく、
 配布責任者が別の仕組みで通信制御を確認するという明示的な委任です。フォルダ指定では、
-その直下にGGUFが1つだけ必要です。このローカル設定は `.gitignore` の対象なので、共有先の名前を
+その直下にモデル本体GGUFが1つだけ必要で、対応する `mmproj-*.gguf` を最大1つ追加できます。
+モデル本体ファイルを直接指定する構成では、任意の `VisionProjectorPath` にmmprojを指定できます。
+複数のモデル本体や複数のmmprojは安全のため拒否します。このローカル設定は `.gitignore` の対象なので、共有先の名前を
 GitHubへ公開しません。設定済みパッケージを受け取る利用者には、この作業は不要です。
 
 セットアップ済みPCでも、LM Studioを終了して `ProjectFirewall` の `'ON'` / `'OFF'` を変更し、
@@ -132,7 +135,7 @@ Firewallも明示的に削除する完全解除だけ、PowerShellから `-Remov
 | `%USERPROFILE%\.lmstudio\mcp.json` | LM Studio標準 | `mcpServers`を空にする。変更前にバックアップ |
 | `%USERPROFILE%\.lmstudio\.internal\http-server-config.json` | LM Studio内部 | 存在する場合だけ、自動起動をOFF・待受け先をlocalhostへ変更。変更前にバックアップ |
 | `config\deployment.local.psd1` | 配布管理者 | 共有モデルの場所。Git管理対象外で利用者は編集不要 |
-| `%USERPROFILE%\.lmstudio\models\secure-deployment\` | 本プロジェクト | 共有GGUFを指す管理用シンボリックリンク |
+| `%USERPROFILE%\.lmstudio\models\secure-deployment\` | 本プロジェクト | モデル本体と任意のmmprojを指す管理用シンボリックリンク |
 | `%USERPROFILE%\.lmstudio\secure-setup\` | 本プロジェクト | 初回Setupで新規作成する専用領域 |
 | `secure-setup\setup-state.json` | 本プロジェクト | Setup結果を保存。初回の安全起動成功後に許可モデル、パス照合用ハッシュ、Runtime検証結果を確定 |
 | `secure-setup\last-launch.json` | 本プロジェクト | 最後に成功した安全起動の結果とパス照合用ハッシュを保存 |
@@ -153,6 +156,7 @@ LM Studioを起動せず停止します。復旧方法は Setup の再実行で�
 
 - セットアップは再実行でき、共有モデルリンク、JSON保護、および選択したネットワーク管理方法の記録が成功するまでSetup完了状態にしません。
 - モデルとRuntimeは初回の安全起動で検証し、承認モデルのロード成功後にだけ検証済み状態へ更新します。
+- mmprojを登録した場合は、LM Studioが承認モデルを `vision: true` と認識しなければ安全起動を完了しません。以後も画像入力対応状態の変化を検出します。従来のテキスト専用1ファイル構成もそのまま利用できます。
 - JSON 変更は検証済み一時ファイル、原子的置換、バックアップ、ロールバックを使います。
 - `ProjectFirewall = 'ON'`の安全起動は Firewall 規則の欠落・無効化・古い状態に加え、適用プロファイル、プロトコル、
   ポート、対象サービスの不完全な制限も拒否し、新しい実行ファイルを検知します。

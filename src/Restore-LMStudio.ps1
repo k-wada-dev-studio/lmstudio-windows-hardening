@@ -739,6 +739,7 @@ function Invoke-MainRestore {
         )
     }
     $managedModelLinkPath = [string](Get-PropertyValue -InputObject $priorState -Name 'ManagedModelLinkPath')
+    $managedVisionProjectorLinkPath = [string](Get-PropertyValue -InputObject $priorState -Name 'ManagedVisionProjectorLinkPath')
 
     $running = @(Get-RunningLMStudioProcesses -HomePath $homePath -KnownProgramPaths $knownProgramPaths)
     if ($running.Count -gt 0) {
@@ -797,6 +798,14 @@ function Invoke-MainRestore {
         throw
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($managedVisionProjectorLinkPath)) {
+        if ([IO.Path]::GetFileName($managedVisionProjectorLinkPath) -notmatch '^(?i:mmproj(?:[-_.].*)?\.gguf)$') {
+            throw 'Recorded vision-projector link does not have an mmproj GGUF filename; it was not deleted.'
+        }
+        if (Remove-ManagedModelLink -LinkPath $managedVisionProjectorLinkPath -LmStudioHomePath $homePath) {
+            Write-RestoreLog -Level OK -Message 'Removed the setup-managed vision-projector link.'
+        }
+    }
     if (-not [string]::IsNullOrWhiteSpace($managedModelLinkPath)) {
         if (Remove-ManagedModelLink -LinkPath $managedModelLinkPath -LmStudioHomePath $homePath) {
             Write-RestoreLog -Level OK -Message 'Removed the setup-managed shared model link.'
