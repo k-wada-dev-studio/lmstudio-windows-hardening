@@ -183,6 +183,26 @@ function Get-StringSha256 {
     }
 }
 
+function Get-RuntimeIdentifiersFromListText {
+    param([AllowEmptyString()][string]$ListText)
+
+    if ([string]::IsNullOrWhiteSpace($ListText)) { return @() }
+    $pattern = '(?m)^[\t ]*([A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9.+_-]{0,63})(?:[\t ]+|$)'
+    return @([regex]::Matches($ListText, $pattern) | ForEach-Object { $_.Groups[1].Value })
+}
+
+function Test-RuntimeListContainsExact {
+    param(
+        [AllowEmptyString()][string]$ListText,
+        [Parameter(Mandatory = $true)][string]$RequiredRuntime
+    )
+
+    return @(
+        Get-RuntimeIdentifiersFromListText -ListText $ListText |
+            Where-Object { [string]::Equals($_, $RequiredRuntime, [StringComparison]::OrdinalIgnoreCase) }
+    ).Count -eq 1
+}
+
 function Get-ModelPathIdentitySha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -1519,7 +1539,7 @@ function Invoke-MainLaunch {
         $requiredRuntime = [string](Get-PropertyValue -InputObject $state -Name 'RequiredRuntime')
         $modelFormat = [string](Get-PropertyValue -InputObject $approvedModel -Name 'format')
         if (-not [string]::IsNullOrWhiteSpace($requiredRuntime)) {
-            if ($runtimeResult.Text.IndexOf($requiredRuntime, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            if (-not (Test-RuntimeListContainsExact -ListText $runtimeResult.Text -RequiredRuntime $requiredRuntime)) {
                 throw 'セットアップで要求された Runtime がインストールされていません。'
             }
         }

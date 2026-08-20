@@ -4,6 +4,8 @@ mcp.json
 config/deployment.local.psd1
 *.gguf
 *.safetensors
+*.exe
+*.msi
 models/
 
 # Runtime state, requests, logs, and backups

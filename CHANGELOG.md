@@ -5,6 +5,28 @@ Versioning after the first stable release.
 
 ## Unreleased
 
+- Add a verified complete-uninstall entry point. It runs only the pinned signed
+  current-user vendor uninstaller, confirms application removal, deletes the
+  fixed profile, legacy Roaming settings, and updater cache through link-safe
+  quarantines, removes only project-owned Firewall groups, and preserves shared
+  model targets.
+  Empty fixed install directories left by the vendor NSIS uninstaller are
+  verified and removed without treating a successful uninstall as a timeout.
+
+- Add a one-click Windows entry point that validates and silently installs a
+  pinned LM Studio NSIS package, bootstraps the user profile and CLI, optionally
+  downloads one exact runtime non-interactively, transitions through a temporary
+  first-run network boundary, runs secure setup, and opens the approved model.
+  Runtime acquisition now requires an explicit deployment policy, and both the
+  bootstrap and routine launch verify the pinned runtime as an exact inventory row.
+  Installed-version verification also supports LM Studio builds whose product
+  version is empty or Windows-normalized while the file version remains exact,
+  while still requiring matching signed-executable, Electron-package, and Windows
+  uninstall-registration evidence.
+  The first-run handoff now waits for a confirmed GUI-backed CLI connection
+  instead of treating early `settings.json` and `lms.exe` extraction as full
+  application readiness.
+
 - Add a separate post-uninstall complete-profile deletion entry point. It
   verifies the fixed current-user target and application absence, previews the
   inventory, requires two confirmations, stages the profile on the same volume,

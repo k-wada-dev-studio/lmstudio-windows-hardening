@@ -4,20 +4,24 @@
 
 Use trusted official sources while normal internet access is still available.
 
-1. Install and start LM Studio once so its profile and `lms` CLI are initialized.
-2. Install a compatible runtime and place one intended primary GGUF on the
+1. Stage a trusted LM Studio Windows installer. Record its exact product version,
+   SHA-256, and Authenticode signer-certificate thumbprint.
+2. Select an exact compatible runtime identifier and place one intended primary GGUF on the
    approved Windows shared folder. For image input, also place exactly one
    matching `mmproj-*.gguf` beside it. Do not place two projector variants there.
 3. As the deployment owner, copy `config/deployment.local.psd1.example` to the
    gitignored `config/deployment.local.psd1`, set `ModelSourcePath`, and select
-   `ProjectFirewall`. The package default is `'OFF'`, which delegates network
+   `ProjectFirewall`, installer fields, `RuntimeProvisioning`, and `RequiredRuntime`.
+   The package default is `'OFF'`, which delegates network
    enforcement to the organization and is not verified by this project. Select
    `'ON'` when project-created and audited Windows Firewall rules are required. Users do
    not change LM Studio's My Models or JSON settings. Setup registers the shared
    primary GGUF and optional projector through managed symbolic links and detects
    its `modelKey` automatically.
-4. Close LM Studio, tray/background helpers, and `llmster` completely.
-5. Keep a separate recovery path to the original installer and documentation.
+4. For an already installed/manual flow, initialize LM Studio and its runtime first.
+   The one-click flow performs those phases automatically.
+5. Close LM Studio, tray/background helpers, and `llmster` completely.
+6. Keep a separate recovery path to the original installer and documentation.
 
 Do not place real `settings.json`, `mcp.json`, logs, models, or runtime binaries
 inside this repository.
@@ -39,7 +43,24 @@ powershell.exe -NoProfile -File .\tests\Test-Behavior.ps1
 Read the scripts and compare `config/settings.baseline.json` with your policy.
 The baseline is documentation; changing it alone does not change enforcement.
 
-## 3. Initial setup
+## 3. One-click install, setup, and first secure launch
+
+Run `0-Install-and-Setup.cmd` as the ordinary target user. For a read-only
+preflight first:
+
+```powershell
+.\src\Install-LMStudio.ps1 -PreviewOnly
+```
+
+The workflow validates the staged NSIS installer, installs the exact version,
+creates the LM Studio profile and CLI, provisions the exact runtime, gracefully
+closes bootstrap processes, runs secure setup, and opens the approved model.
+With `ProjectFirewall = 'ON'`, first-run initialization is blocked from
+non-loopback access. `OnlinePinned` temporarily removes only that bootstrap
+block for the exact runtime download, then restores protection before setup.
+`Existing` performs no runtime download.
+
+## 4. Initial setup for an already installed deployment
 
 Run as the normal LM Studio user:
 
@@ -68,7 +89,7 @@ Expected result:
 - the state contains no plaintext share path
 - LM Studio remains closed
 
-## 4. Routine launch
+## 5. Routine launch
 
 Always use:
 
@@ -76,8 +97,8 @@ Always use:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\Start-LMStudio-Secure.ps1
 ```
 
-The launcher audits the recorded state and exact executable inventory. In
-with `ProjectFirewall = 'ON'` it also audits the project rules; with `'OFF'` it
+The launcher audits the recorded state and exact executable inventory. With
+`ProjectFirewall = 'ON'` it also audits the project rules; with `'OFF'` it
 warns that organizational enforcement is delegated and not verified here. It
 re-applies JSON defense-in-depth if necessary, disables public API auto-start,
 restricts its saved bind address to loopback, and starts LM Studio as the normal user.
@@ -89,7 +110,7 @@ produce `vision: true` or the launch fails closed.
 If any check fails, treat the refusal as a security signal rather than bypassing
 the script.
 
-## 5. Update LM Studio, runtime, or model
+## 6. Update LM Studio, runtime, or model
 
 Updates intentionally require a new trust decision because executable paths and
 runtime inventory may change.
@@ -112,7 +133,7 @@ runtime inventory may change.
 Never add a broad allow rule to compensate for an update. Setup should discover
 and protect the new executable paths.
 
-## 6. Restore and recovery
+## 7. Restore and recovery
 
 Standard restore:
 
@@ -139,7 +160,7 @@ If explicitly requested Firewall removal or UAC approval fails, the JSON restore
 complete, but blocking rules remain. This is the safer failure state. Review the
 log and re-run restore; do not manually delete unrelated Firewall rules.
 
-## 7. Delete private chat data and logs
+## 8. Delete private chat data and logs
 
 Close LM Studio and all runtimes, then use `4-Delete-Private-Data.cmd`. The
 entry point requires an explicit confirmation and removes only chat history,
@@ -156,7 +177,7 @@ Deletion refuses reparse points, stages the fixed directories in a same-volume
 quarantine, and rolls back if staging fails. Normal filesystem deletion is not
 cryptographic secure erasure.
 
-## 8. Complete profile deletion after uninstall
+## 9. Complete profile deletion after uninstall
 
 Use `5-Delete-All-LMStudio-Data.cmd` only after uninstalling LM Studio. It
 removes the complete `%USERPROFILE%\.lmstudio` profile and is intentionally
@@ -175,7 +196,30 @@ the profile is removed. If deletion fails after the atomic move, the error
 reports `%USERPROFILE%\.lmstudio-delete-quarantine`; rerunning retries that
 residual cleanup. Project-managed Firewall rules are reported but not removed.
 
-## 9. Manual release checklist
+## 10. Complete one-click uninstall
+
+Close LM Studio and all runtimes, then use `6-Uninstall-and-Delete-All.cmd`. The
+entry point first performs a read-only preview, then requires `Y` and the exact
+word `UNINSTALL`.
+
+The workflow verifies the pinned application and signed vendor uninstaller,
+runs only the fixed `/currentuser /S` arguments, waits for the application and
+Windows registration to disappear, and then deletes the fixed `.lmstudio`,
+legacy Roaming, and updater-cache roots. It removes only the two project-owned
+Firewall groups. Shared-model links are deleted without following their targets.
+
+For preview only:
+
+```powershell
+.\src\Uninstall-LMStudio.ps1 -PreviewOnly
+```
+
+If the vendor uninstaller fails or leaves application evidence, user-data
+deletion does not start. If deletion fails after staging, rerun the same command;
+the fixed quarantine paths are recognized. Normal deletion is not cryptographic
+secure erasure.
+
+## 11. Manual release checklist
 
 Before tagging a stable release, test on a disposable Windows machine:
 

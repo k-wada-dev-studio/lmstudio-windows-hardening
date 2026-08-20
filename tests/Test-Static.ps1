@@ -27,7 +27,10 @@ function Get-TextFiles {
         }
         elseif (Test-Path -LiteralPath $root -PathType Container) {
             $items += Get-ChildItem -LiteralPath $root -Recurse -File |
-                Where-Object { $_.Extension -in @('.ps1', '.psd1', '.cmd', '.json', '.md', '.yml', '.yaml') }
+                Where-Object {
+                    $_.Extension -in @('.ps1', '.psd1', '.cmd', '.json', '.md', '.yml', '.yaml') -and
+                    $_.FullName -notlike '*\config\deployment.local.psd1'
+                }
         }
     }
     return @($items | Sort-Object FullName -Unique)
@@ -35,7 +38,7 @@ function Get-TextFiles {
 
 $repo = [IO.Path]::GetFullPath($RepoRoot)
 $scripts = @(Get-ChildItem -LiteralPath (Join-Path $repo 'src') -Filter '*.ps1' -File)
-Assert-True ($scripts.Count -eq 5) 'Exactly five product scripts are present'
+Assert-True ($scripts.Count -eq 7) 'Exactly seven product scripts are present'
 
 foreach ($scriptFile in $scripts) {
     $tokens = $null
@@ -52,7 +55,7 @@ foreach ($scriptFile in $scripts) {
     Assert-True $hasBom "$($scriptFile.Name) has a UTF-8 BOM for Windows PowerShell 5.1"
 
     $text = [IO.File]::ReadAllText($scriptFile.FullName)
-    foreach ($forbidden in @(
+    $forbiddenOperations = @(
         '(?i)\bInvoke-WebRequest\b',
         '(?i)\bInvoke-RestMethod\b',
         '(?i)\bStart-BitsTransfer\b',
@@ -60,7 +63,13 @@ foreach ($scriptFile in $scripts) {
         '(?i)\btaskkill(?:\.exe)?\b',
         '(?i)\blms(?:\.exe)?\s+get\b',
         '(?i)\blms(?:\.exe)?\s+runtime\s+get\b'
-    )) {
+    )
+    if ($scriptFile.Name -eq 'Install-LMStudio.ps1') {
+        $forbiddenOperations = @($forbiddenOperations | Where-Object {
+            $_ -ne '(?i)\blms(?:\.exe)?\s+runtime\s+get\b'
+        })
+    }
+    foreach ($forbidden in $forbiddenOperations) {
         Assert-True (-not [regex]::IsMatch($text, $forbidden)) "$($scriptFile.Name) excludes forbidden operation $forbidden"
     }
 }
@@ -84,11 +93,13 @@ $scanFiles = Get-TextFiles -Roots @(
     (Join-Path $repo 'README.md'),
     (Join-Path $repo 'README.ja.md'),
     (Join-Path $repo 'SECURITY.md'),
+    (Join-Path $repo '0-Install-and-Setup.cmd'),
     (Join-Path $repo '1-Setup.cmd'),
     (Join-Path $repo '2-Start-Secure.cmd'),
     (Join-Path $repo '3-Restore.cmd'),
     (Join-Path $repo '4-Delete-Private-Data.cmd'),
     (Join-Path $repo '5-Delete-All-LMStudio-Data.cmd'),
+    (Join-Path $repo '6-Uninstall-and-Delete-All.cmd'),
     (Join-Path $repo 'Check-Package.cmd')
 )
 foreach ($file in $scanFiles) {
@@ -138,6 +149,8 @@ $startText = [IO.File]::ReadAllText((Join-Path $repo 'src\Start-LMStudio-Secure.
 $restoreText = [IO.File]::ReadAllText((Join-Path $repo 'src\Restore-LMStudio.ps1'))
 $privateDataRemovalText = [IO.File]::ReadAllText((Join-Path $repo 'src\Remove-LMStudio-PrivateData.ps1'))
 $completeProfileRemovalText = [IO.File]::ReadAllText((Join-Path $repo 'src\Remove-LMStudio-Profile.ps1'))
+$uninstallerText = [IO.File]::ReadAllText((Join-Path $repo 'src\Uninstall-LMStudio.ps1'))
+$installerText = [IO.File]::ReadAllText((Join-Path $repo 'src\Install-LMStudio.ps1'))
 foreach ($textAndName in @(
     [pscustomobject]@{ Name = 'Setup-LMStudio.ps1'; Text = $setupText },
     [pscustomobject]@{ Name = 'Start-LMStudio-Secure.ps1'; Text = $startText }
@@ -207,9 +220,54 @@ Assert-True ($completeProfileRemovalText.Contains('Project-managed Windows Firew
 $completeEntryText = [IO.File]::ReadAllText((Join-Path $repo '5-Delete-All-LMStudio-Data.cmd'))
 Assert-True ($completeEntryText.Contains('-RequireTypedConfirmation') -and $completeProfileRemovalText.Contains("Read-Host 'Type DELETE to confirm'")) 'Complete-deletion entry point requires a safely handled second typed confirmation'
 Assert-True ($completeEntryText.Contains('-PreviewOnly') -and $completeEntryText.Contains('-ConfirmDeletion')) 'Complete-deletion entry point previews before destructive execution'
+Assert-True ($installerText.Contains('Assert-PinnedInstaller')) 'One-click install validates its pinned installer before execution'
+Assert-True ($installerText.Contains('Assert-OneClickModelPackage')) 'One-click install validates the shared model package before installation'
+Assert-True ($installerText.Contains('PRIVATE PATH NOT DISPLAYED')) 'One-click preview does not disclose the private shared-model path'
+Assert-True ($installerText.Contains('Get-AuthenticodeSignature')) 'One-click install verifies the installer Authenticode signature'
+Assert-True ($installerText.Contains('resources\app\package.json')) 'One-click install verifies the installed Electron package version'
+Assert-True ($installerText.Contains('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*')) 'One-click install verifies the installed Windows registration'
+Assert-True ($installerText.Contains('$hasWindowsVersionMetadata -and')) 'One-click install safely falls back when the installed executable has empty Windows version fields'
+Assert-True ($installerText.Contains('[string]$info.FileVersion')) 'One-click install accepts the exact pinned file version when Windows normalizes ProductVersion'
+Assert-True ($installerText.Contains("@('runtime', 'get', `$RequiredRuntime, '-y')")) 'One-click install uses an exact non-interactive runtime query'
+Assert-True ($installerText.Contains("@('runtime', 'select', `$RequiredRuntime)")) 'One-click install explicitly selects the pinned runtime'
+Assert-True ($installerText.Contains('Test-RuntimeListContainsExact')) 'One-click install verifies the pinned runtime as an exact inventory row'
+Assert-True ($startText.Contains('Test-RuntimeListContainsExact')) 'Secure launch verifies the pinned runtime as an exact inventory row'
+Assert-True ($installerText.Contains('LM Studio Secure Bootstrap')) 'One-click install implements a temporary first-run network boundary'
+foreach ($requiredBootstrapAudit in @(
+    'Test-BootstrapFirewallRules',
+    'Get-NetFirewallApplicationFilter',
+    'Get-NetFirewallAddressFilter',
+    'Get-NetFirewallPortFilter',
+    'Get-NetFirewallInterfaceTypeFilter',
+    'Get-NetFirewallServiceFilter'
+)) {
+    Assert-True ($installerText.Contains($requiredBootstrapAudit)) "One-click install fully audits its temporary Firewall boundary: $requiredBootstrapAudit"
+}
+Assert-True ($installerText.Contains('Stop-BootstrapGuiGracefully')) 'One-click install requires graceful bootstrap shutdown'
+Assert-True ($installerText.Contains('Wait-ForBootstrapGuiReady')) 'One-click install waits for a real GUI CLI connection after profile extraction'
+Assert-True ($installerText.Contains("@('daemon', 'status', '--json')")) 'One-click install probes the documented GUI status before runtime work'
+Assert-True ($installerText.Contains('LM Studio GUI内部APIの準備完了を待っています。')) 'One-click install reports bounded GUI readiness waiting'
+Assert-True (-not $installerText.Contains('Invoke-WebRequest') -and -not $installerText.Contains('Invoke-RestMethod')) 'One-click install never downloads the LM Studio installer itself'
+$oneClickEntryText = [IO.File]::ReadAllText((Join-Path $repo '0-Install-and-Setup.cmd'))
+Assert-True ($oneClickEntryText.Contains('src\Install-LMStudio.ps1')) 'One-click entry point invokes the fixed local installer orchestrator'
+
+Assert-True ($uninstallerText.Contains('Get-VerifiedVendorUninstaller')) 'Complete uninstall verifies the fixed vendor uninstaller'
+Assert-True ($uninstallerText.Contains('Get-AuthenticodeSignature')) 'Complete uninstall verifies application and uninstaller signatures'
+Assert-True ($uninstallerText.Contains("@('/currentuser', '/S')")) 'Complete uninstall constructs only the verified silent vendor arguments'
+Assert-True ($uninstallerText.Contains("Join-Path `$userProfile '.lmstudio'")) 'Complete uninstall pins the current-user LM Studio profile'
+Assert-True ($uninstallerText.Contains("Join-Path `$roamingRoot 'LM Studio'")) 'Complete uninstall includes the fixed legacy Roaming settings directory'
+Assert-True ($uninstallerText.Contains("Join-Path `$localRoot 'lm-studio-updater'")) 'Complete uninstall includes the fixed updater cache'
+Assert-True ($uninstallerText.Contains('Remove-DirectoryTreeWithoutFollowingLinks')) 'Complete uninstall deletes quarantines without following links'
+Assert-True ($uninstallerText.Contains('Remove-ManagedFirewallRules')) 'Complete uninstall removes only project-owned Firewall groups'
+Assert-True ($uninstallerText.Contains('Remove-EmptyCurrentUserInstallRoot')) 'Complete uninstall safely removes an empty fixed vendor residue directory'
+Assert-True ($uninstallerText.Contains("Get-ChildItem -LiteralPath `$resolved -Force")) 'Complete uninstall verifies the vendor residue directory is empty before removal'
+Assert-True (-not $uninstallerText.Contains('Remove-Item -Recurse')) 'Complete uninstall never uses an unbounded recursive deletion command'
+$uninstallEntryText = [IO.File]::ReadAllText((Join-Path $repo '6-Uninstall-and-Delete-All.cmd'))
+Assert-True ($uninstallEntryText.Contains('-PreviewOnly') -and $uninstallEntryText.Contains('-ConfirmUninstall')) 'Complete-uninstall entry previews before destructive execution'
+Assert-True ($uninstallEntryText.Contains('-RequireTypedConfirmation') -and $uninstallerText.Contains("Read-Host 'Type UNINSTALL to confirm'")) 'Complete-uninstall entry requires explicit typed confirmation'
 
 $entryPoints = @(Get-ChildItem -LiteralPath $repo -Filter '*.cmd' -File)
-Assert-True ($entryPoints.Count -eq 6) 'Six non-technical command entry points are present'
+Assert-True ($entryPoints.Count -eq 8) 'Eight non-technical command entry points are present'
 foreach ($entryPoint in $entryPoints) {
     $entryText = [IO.File]::ReadAllText($entryPoint.FullName)
     $entryBytes = [IO.File]::ReadAllBytes($entryPoint.FullName)
@@ -221,6 +279,18 @@ foreach ($entryPoint in $entryPoints) {
 $gitignore = [IO.File]::ReadAllText((Join-Path $repo '.gitignore'))
 foreach ($entry in @('settings.json', 'mcp.json', 'config/deployment.local.psd1', 'secure-setup/', '*.gguf', '*.log')) {
     Assert-True ($gitignore.Contains($entry)) ".gitignore excludes $entry"
+}
+
+$deploymentExample = [IO.File]::ReadAllText((Join-Path $repo 'config\deployment.local.psd1.example'))
+foreach ($requiredOneClickSetting in @(
+    'InstallerPath',
+    'InstallerSha256',
+    'InstallerProductVersion',
+    'InstallerSignerThumbprint',
+    'RuntimeProvisioning',
+    'RequiredRuntime'
+)) {
+    Assert-True ($deploymentExample.Contains($requiredOneClickSetting)) "Public deployment example documents $requiredOneClickSetting"
 }
 
 $workflow = [IO.File]::ReadAllText((Join-Path $repo '.github\workflows\ci.yml'))

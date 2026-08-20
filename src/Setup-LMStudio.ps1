@@ -258,7 +258,11 @@ function Read-DeploymentModelConfig {
     }
 
     foreach ($key in @($config.Keys)) {
-        if ([string]$key -notin @('ModelSourcePath', 'VisionProjectorPath', 'ModelUserRepo', 'ProjectFirewall', 'FirewallMode')) {
+        if ([string]$key -notin @(
+            'ModelSourcePath', 'VisionProjectorPath', 'ModelUserRepo', 'ProjectFirewall', 'FirewallMode',
+            'InstallerPath', 'InstallerSha256', 'InstallerProductVersion',
+            'InstallerSignerThumbprint', 'RuntimeProvisioning', 'RequiredRuntime'
+        )) {
             throw "配布設定に未対応の項目があります: $key"
         }
     }
