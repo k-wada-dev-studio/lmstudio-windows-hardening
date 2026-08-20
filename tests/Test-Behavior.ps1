@@ -579,6 +579,33 @@ try {
     }).Count -eq 0) 'Private-data deletion leaves the four fixed directories empty'
     Assert-True ((Test-Path -LiteralPath (Join-Path $privacyHome 'settings.json') -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $privacyHome 'models\preserve.gguf') -PathType Leaf)) 'Private-data deletion preserves settings and models'
+
+    foreach ($definition in @(Get-ScriptFunctionDefinitions -Path (Join-Path $repo 'src\Remove-LMStudio-Profile.ps1'))) {
+        . $definition
+    }
+    $completeUserRoot = Join-Path $tempRoot 'complete-profile-user'
+    $completeHome = Join-Path $completeUserRoot '.lmstudio'
+    $sharedTarget = Join-Path $tempRoot 'shared-model-target'
+    New-Item -ItemType Directory -Path (Join-Path $completeHome '.internal') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $completeHome 'models\secure-deployment') -Force | Out-Null
+    New-Item -ItemType Directory -Path $sharedTarget -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $completeHome 'settings.json'), 'delete-settings')
+    [IO.File]::WriteAllText((Join-Path $completeHome '.internal\cache.dat'), 'delete-cache')
+    [IO.File]::WriteAllText((Join-Path $sharedTarget 'shared.gguf'), 'preserve-shared-model')
+    $modelJunction = Join-Path $completeHome 'models\secure-deployment\shared-target'
+    New-Item -ItemType Junction -Path $modelJunction -Target $sharedTarget -ErrorAction Stop | Out-Null
+    $completeSummary = Get-LMStudioProfileSummary -RootPath $completeHome
+    Assert-True ($completeSummary.FileCount -eq 2 -and $completeSummary.ReparsePointCount -eq 1) 'Complete deletion inventory does not traverse a shared-model junction'
+    $completeResult = Remove-LMStudioCompleteProfile -HomePath $completeHome -UserProfilePath $completeUserRoot
+    Assert-True ($completeResult.RemovedProfile -and -not (Test-Path -LiteralPath $completeHome)) 'Complete deletion removes the fixed LM Studio profile'
+    Assert-True (Test-Path -LiteralPath (Join-Path $sharedTarget 'shared.gguf') -PathType Leaf) 'Complete deletion removes a model link without deleting its shared target'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $completeUserRoot '.lmstudio-delete-quarantine'))) 'Complete deletion leaves no quarantine after success'
+
+    $wrongHome = Join-Path $completeUserRoot 'not-lmstudio'
+    New-Item -ItemType Directory -Path $wrongHome -Force | Out-Null
+    Assert-Throws {
+        Assert-ExactDefaultLMStudioProfile -HomePath $wrongHome -UserProfilePath $completeUserRoot
+    } 'Complete deletion rejects a directory other than the fixed .lmstudio path'
 }
 finally {
     $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

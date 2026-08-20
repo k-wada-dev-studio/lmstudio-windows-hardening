@@ -5,6 +5,11 @@ Versioning after the first stable release.
 
 ## Unreleased
 
+- Add a separate post-uninstall complete-profile deletion entry point. It
+  verifies the fixed current-user target and application absence, previews the
+  inventory, requires two confirmations, stages the profile on the same volume,
+  and deletes links without following shared-folder targets.
+
 - Add an explicitly confirmed private-data deletion entry point for LM Studio
   chat history, chat attachments, LM Studio server logs, and project logs. The
   operation validates fixed profile paths, refuses reparse points, stages data

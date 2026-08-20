@@ -35,7 +35,7 @@ function Get-TextFiles {
 
 $repo = [IO.Path]::GetFullPath($RepoRoot)
 $scripts = @(Get-ChildItem -LiteralPath (Join-Path $repo 'src') -Filter '*.ps1' -File)
-Assert-True ($scripts.Count -eq 4) 'Exactly four product scripts are present'
+Assert-True ($scripts.Count -eq 5) 'Exactly five product scripts are present'
 
 foreach ($scriptFile in $scripts) {
     $tokens = $null
@@ -88,6 +88,7 @@ $scanFiles = Get-TextFiles -Roots @(
     (Join-Path $repo '2-Start-Secure.cmd'),
     (Join-Path $repo '3-Restore.cmd'),
     (Join-Path $repo '4-Delete-Private-Data.cmd'),
+    (Join-Path $repo '5-Delete-All-LMStudio-Data.cmd'),
     (Join-Path $repo 'Check-Package.cmd')
 )
 foreach ($file in $scanFiles) {
@@ -136,6 +137,7 @@ $setupText = [IO.File]::ReadAllText((Join-Path $repo 'src\Setup-LMStudio.ps1'))
 $startText = [IO.File]::ReadAllText((Join-Path $repo 'src\Start-LMStudio-Secure.ps1'))
 $restoreText = [IO.File]::ReadAllText((Join-Path $repo 'src\Restore-LMStudio.ps1'))
 $privateDataRemovalText = [IO.File]::ReadAllText((Join-Path $repo 'src\Remove-LMStudio-PrivateData.ps1'))
+$completeProfileRemovalText = [IO.File]::ReadAllText((Join-Path $repo 'src\Remove-LMStudio-Profile.ps1'))
 foreach ($textAndName in @(
     [pscustomobject]@{ Name = 'Setup-LMStudio.ps1'; Text = $setupText },
     [pscustomobject]@{ Name = 'Start-LMStudio-Secure.ps1'; Text = $startText }
@@ -195,9 +197,19 @@ Assert-True ($privateDataRemovalText.Contains("Join-Path `$resolvedHome 'secure-
 Assert-True ($privateDataRemovalText.Contains('[switch]$ConfirmDeletion')) 'Private-data deletion requires an explicit destructive switch'
 Assert-True ($privateDataRemovalText.Contains('ReparsePoint')) 'Private-data deletion refuses symbolic links and junctions'
 Assert-True (-not $privateDataRemovalText.Contains("Join-Path `$resolvedHome 'models'")) 'Private-data deletion does not target models'
+Assert-True ($completeProfileRemovalText.Contains("Join-Path `$resolvedUserProfile '.lmstudio'")) 'Complete deletion pins the current-user LM Studio profile'
+Assert-True ($completeProfileRemovalText.Contains('[switch]$ConfirmDeletion')) 'Complete deletion requires an explicit destructive switch'
+Assert-True ($completeProfileRemovalText.Contains('Get-RecordedLMStudioExecutablePath')) 'Complete deletion checks the recorded LM Studio executable location'
+Assert-True ($completeProfileRemovalText.Contains('Remove-DirectoryTreeWithoutFollowingLinks')) 'Complete deletion uses a link-safe tree deletion routine'
+Assert-True ($completeProfileRemovalText.Contains('[IO.Directory]::Move($resolvedHome, $resolvedQuarantine)')) 'Complete deletion atomically stages the profile on the same volume'
+Assert-True ($completeProfileRemovalText.Contains("'.lmstudio-delete-quarantine'")) 'Complete deletion uses one fixed recoverable quarantine path'
+Assert-True ($completeProfileRemovalText.Contains('Project-managed Windows Firewall rules were not changed.')) 'Complete deletion reports that Firewall rules remain unchanged'
+$completeEntryText = [IO.File]::ReadAllText((Join-Path $repo '5-Delete-All-LMStudio-Data.cmd'))
+Assert-True ($completeEntryText.Contains('-RequireTypedConfirmation') -and $completeProfileRemovalText.Contains("Read-Host 'Type DELETE to confirm'")) 'Complete-deletion entry point requires a safely handled second typed confirmation'
+Assert-True ($completeEntryText.Contains('-PreviewOnly') -and $completeEntryText.Contains('-ConfirmDeletion')) 'Complete-deletion entry point previews before destructive execution'
 
 $entryPoints = @(Get-ChildItem -LiteralPath $repo -Filter '*.cmd' -File)
-Assert-True ($entryPoints.Count -eq 5) 'Five non-technical command entry points are present'
+Assert-True ($entryPoints.Count -eq 6) 'Six non-technical command entry points are present'
 foreach ($entryPoint in $entryPoints) {
     $entryText = [IO.File]::ReadAllText($entryPoint.FullName)
     $entryBytes = [IO.File]::ReadAllBytes($entryPoint.FullName)

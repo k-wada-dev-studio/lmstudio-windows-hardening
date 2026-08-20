@@ -156,7 +156,26 @@ Deletion refuses reparse points, stages the fixed directories in a same-volume
 quarantine, and rolls back if staging fails. Normal filesystem deletion is not
 cryptographic secure erasure.
 
-## 8. Manual release checklist
+## 8. Complete profile deletion after uninstall
+
+Use `5-Delete-All-LMStudio-Data.cmd` only after uninstalling LM Studio. It
+removes the complete `%USERPROFILE%\.lmstudio` profile and is intentionally
+separate from selective private-data deletion.
+
+For a read-only inventory:
+
+```powershell
+.\src\Remove-LMStudio-Profile.ps1 -PreviewOnly
+```
+
+The deletion verifies that related processes and known application executables
+are absent, requires two confirmations, and never recurses through symbolic
+links or junctions. Shared-model targets remain, but all real data stored inside
+the profile is removed. If deletion fails after the atomic move, the error
+reports `%USERPROFILE%\.lmstudio-delete-quarantine`; rerunning retries that
+residual cleanup. Project-managed Firewall rules are reported but not removed.
+
+## 9. Manual release checklist
 
 Before tagging a stable release, test on a disposable Windows machine:
 
