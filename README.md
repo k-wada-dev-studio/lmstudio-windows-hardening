@@ -40,6 +40,11 @@ and this project's execution logs, fully close LM Studio and double-click
 `4-Delete-Private-Data.cmd`. It requires confirmation and keeps models,
 runtimes, settings, credentials, backups, and setup state.
 
+Only after uninstalling LM Studio, use `5-Delete-All-LMStudio-Data.cmd` to
+remove the complete remaining user profile. It verifies app and process absence,
+previews the inventory, and requires two confirmations. Links to shared-folder
+models are removed without following their targets. Firewall rules are unchanged.
+
 The command files only launch the bundled local `.ps1` files. Their
 `ExecutionPolicy Bypass` applies to that one PowerShell process and does not
 change the machine-wide execution policy.
@@ -176,6 +181,26 @@ Restore remains a configuration-recovery operation and never silently erases
 history. Private-data deletion requires a separate confirmation, refuses
 symbolic links and junctions, and leaves unrelated LM Studio data unchanged.
 It is ordinary filesystem deletion, not cryptographic secure erasure.
+
+## Delete all user data after uninstall
+
+The LM Studio uninstaller may leave `%USERPROFILE%\.lmstudio` for later reuse.
+After uninstalling LM Studio, `5-Delete-All-LMStudio-Data.cmd` can permanently
+remove that complete profile, including settings, credentials, locally stored
+models and runtimes, caches, backups, logs, and state. It is not an application
+uninstaller.
+
+The operation refuses to proceed while related processes run, while a recorded
+or standard `LM Studio.exe` still exists, when the target differs from the
+current user's fixed `.lmstudio` path, or when the profile itself is a reparse
+point. It previews counts and size, requires both `Y` and `DELETE`, moves the
+profile to a fixed same-volume quarantine, and deletes the tree without following
+internal links. Real models stored inside the profile are deleted; shared-folder
+targets are not. Firewall rules remain unchanged. Read-only preview:
+
+```powershell
+.\src\Remove-LMStudio-Profile.ps1 -PreviewOnly
+```
 
 Do not edit `setup-state.json` manually. Missing, damaged, or inconsistent state
 causes the launcher to stop without starting LM Studio; re-run setup to recover.
